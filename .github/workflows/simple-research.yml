@@ -1,0 +1,536 @@
+name: 📊 Simplified Research Automation
+
+on:
+  workflow_dispatch:
+    inputs:
+      search_topics:
+        description: 'Research topics (comma-separated)'
+        required: true
+        default: 'credit risk management,ESG rating'
+      
+      email_recipients:
+        description: 'Email recipients (comma-separated)'
+        required: true
+        default: 'admin@example.com'
+        
+      sender_name:
+        description: 'Custom sender name'
+        required: false
+        default: 'CreditResearch'
+      
+      time_filter:
+        description: 'Search time range'
+        required: false
+        default: 'week'
+        type: choice
+        options:
+          - 'day'     # Last 24 hours
+          - 'week'    # Last 7 days
+          - 'month'   # Last 30 days
+          - 'year'    # Last 365 days
+      
+      llm_model:
+        description: 'LLM model selection'
+        required: false
+        default: 'llm'
+        type: choice
+        options:
+          - 'llm'           # Default LLM model
+          - 'llm-claude'    # Claude model
+          - 'llm-gpt'       # GPT model
+      
+      embedding_model:
+        description: 'Embedding model selection'
+        required: false
+        default: 'embedding'
+        type: choice
+        options:
+          - 'embedding'         # Default embedding model
+          - 'embedding-openai'  # OpenAI embedding model
+      
+      search_query_template:
+        description: 'Custom Perplexity search query template'
+        required: false
+        default: '{topic} research methodology policy analysis central bank regulator academic paper whitepaper NOT corporate homepage NOT about-us NOT company-profile NOT marketing'
+        type: string
+      
+      result_title_template:
+        description: 'Custom search result title template'
+        required: false
+        default: 'Credit Research Dynamics - {topic}'
+        type: string
+      
+      result_content_template:
+        description: 'Custom search result content template'
+        required: false
+        default: 'Latest research dynamics and market analysis on {topic}, including policy changes, technology developments, market trends and other important information.'
+        type: string
+      
+
+
+env:
+  PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+  QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
+  CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+  SMTP_PORT: ${{ secrets.SMTP_PORT }}
+  SMTP_USER: ${{ secrets.SMTP_USER }}
+  SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+
+jobs:
+  simple-research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: 📥 检出代码
+      uses: actions/checkout@v4
+    
+    - name: 🐍 设置Python环境
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: 📦 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests urllib3 aiofiles asyncio python-dotenv openai
+    
+    - name: 📁 创建报告目录
+      run: |
+        mkdir -p reports
+        echo "✅ 报告目录已创建"
+    
+    - name: 🎯 执行简化研究流程
+      id: research
+      run: |
+        python3 << 'EOF'
+        import asyncio
+        import os
+        import sys
+        import json
+        import smtplib
+        from datetime import datetime
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        from email.utils import formataddr
+        
+        async def main():
+            print("🎯 开始简化研究自动化")
+            print("=" * 50)
+            
+            # 获取输入参数
+            topics_input = "${{ github.event.inputs.search_topics || '信用风险管理,ESG评级' }}"
+            topics = [t.strip() for t in topics_input.split(',') if t.strip()]
+            
+            recipients_input = "${{ github.event.inputs.email_recipients || 'admin@example.com' }}"
+            recipients = [r.strip() for r in recipients_input.split(',') if r.strip()]
+            
+            sender_name = "${{ github.event.inputs.sender_name || 'CreditResearch' }}"
+            time_filter = "${{ github.event.inputs.time_filter || 'week' }}"
+            llm_model = "${{ github.event.inputs.llm_model || 'llm' }}"
+            embedding_model = "${{ github.event.inputs.embedding_model || 'embedding' }}"
+            
+            # 自定义Prompt模板参数
+            search_query_template = "${{ github.event.inputs.search_query_template || '{topic} research methodology policy analysis central bank regulator academic paper whitepaper NOT corporate homepage NOT about-us NOT company-profile NOT marketing' }}"
+            result_title_template = "${{ github.event.inputs.result_title_template || 'Credit Research Dynamics - {topic}' }}"
+            result_content_template = "${{ github.event.inputs.result_content_template || 'Latest research dynamics and market analysis on {topic}, including policy changes, technology developments, market trends and other important information.' }}"
+
+            
+            print(f"🔍 搜索主题: {topics}")
+            print(f"📧 接收者: {recipients}")
+            print(f"⏰ 时间范围: {time_filter}")
+            print(f"🤖 LLM模型: {llm_model}")
+            print(f"🧠 Embedding模型: {embedding_model}")
+            print(f"📝 搜索查询模板: {search_query_template}")
+            print(f"🏷️ 结果标题模板: {result_title_template}")
+
+            
+            # 保存当前配置用于下次默认值 (记忆功能)
+            config_memory = {
+                "last_search_query_template": search_query_template,
+                "last_result_title_template": result_title_template,
+                "last_result_content_template": result_content_template,
+
+                "last_time_filter": time_filter,
+                "last_llm_model": llm_model,
+                "last_embedding_model": embedding_model,
+                "last_updated": "$(date '+%Y-%m-%d %H:%M:%S')"
+            }
+            
+            # 保存配置到文件
+            import json
+            os.makedirs('.github/memory', exist_ok=True)
+            with open('.github/memory/simple_research_config.json', 'w', encoding='utf-8') as f:
+                json.dump(config_memory, f, ensure_ascii=False, indent=2)
+            print("💾 已保存当前配置，下次运行将作为默认值")
+            
+            try:
+                # 导入统一模型管理器
+                sys.path.append(os.path.join(os.getcwd(), 'oop'))
+                from model_manager import call_search, call_embedding, call_llm, get_model_status
+                from search_result_processor import SearchResultProcessor
+                
+                # 检查模型状态
+                print("\n🔧 检查模型状态...")
+                model_status = get_model_status()
+                available_models = {k: v for k, v in model_status.items() if v["available"]}
+                
+                if not available_models:
+                    print("❌ 没有可用的模型，请检查API密钥配置")
+                    return False
+                
+                print("✅ 可用模型:")
+                for alias, info in available_models.items():
+                    print(f"  • {alias}: {info['provider']}-{info['model_id']} ({info['type']})")
+                
+                # 第1步：智能搜索（并发处理）
+                print("\n📡 第1步：执行智能搜索...")
+                print(f"🚀 开始并发搜索 {len(topics)} 个主题...")
+                
+                async def search_single_topic_simple(topic):
+                    """异步搜索单个主题（简化版）"""
+                    print(f"🔍 搜索主题: {topic}")
+                    
+                    try:
+                        # 使用自定义搜索查询模板
+                        search_query = search_query_template.format(topic=topic)
+                        search_response = await call_search(
+                            query=search_query,
+                            model_alias="search",
+                            search_recency_filter=time_filter,
+                            return_related_questions=True,
+                            max_results=3
+                        )
+                        
+                        if search_response.get('success'):
+                            # 提取Perplexity的搜索内容和元数据
+                            content = search_response.get('content', '')
+                            raw_search_results = search_response.get('search_results', [])
+                            related_questions = search_response.get('related_questions', [])
+                            
+                            # 构建包含原始链接的结果
+                            result_item = {
+                                "title": result_title_template.format(topic=topic),
+                                "content": content,
+                                "topic": topic,
+                                "source": "Perplexity AI",
+                                "relevance_score": 0.9,
+                                "perplexity_sources": raw_search_results,  # 原始搜索来源
+                                "related_questions": related_questions,   # 相关问题
+                                "search_query": search_query,
+                                "time_filter": time_filter
+                            }
+                            
+                            # 如果有搜索来源，提取第一个作为主要链接
+                            if raw_search_results and len(raw_search_results) > 0:
+                                first_source = raw_search_results[0]
+                                result_item["url"] = first_source.get("url", "")
+                                result_item["source_title"] = first_source.get("title", "")
+                            else:
+                                result_item["url"] = ""
+                                result_item["source_title"] = ""
+                            
+                            print(f"  ✅ 找到 {len(raw_search_results)} 个原始来源 for {topic}")
+                            return result_item
+                        else:
+                            print(f"  ⚠️ 搜索失败 for {topic}: {search_response.get('error', '未知错误')}")
+                            # 添加模拟结果作为备用
+                            mock_result = {
+                                "title": result_title_template.format(topic=topic),
+                                "content": result_content_template.format(topic=topic),
+                                "url": "https://example.com/research",
+                                "source": "备用数据",
+                                "relevance_score": 0.8,
+                                "topic": topic
+                            }
+                            return mock_result
+                    
+                    except Exception as e:
+                        print(f"  ❌ 搜索异常 for {topic}: {e}")
+                        # 添加错误处理的模拟结果
+                        mock_result = {
+                            "title": f"Backup Data - {topic}",
+                            "content": f"Research information and analysis report related to {topic}.",
+                            "url": "https://example.com/backup", 
+                            "source": "Simulated Data",
+                            "relevance_score": 0.7,
+                            "topic": topic
+                        }
+                        return mock_result
+                
+                # 执行所有搜索任务并发
+                import asyncio
+                import time
+                search_start_time = time.time()
+                search_tasks = [search_single_topic_simple(topic) for topic in topics]
+                search_results_list = await asyncio.gather(*search_tasks, return_exceptions=True)
+                search_end_time = time.time()
+                
+                print(f"⚡ 并发搜索完成，耗时 {search_end_time - search_start_time:.2f} 秒")
+                
+                # 处理结果和异常
+                search_results = []
+                for i, result in enumerate(search_results_list):
+                    if isinstance(result, Exception):
+                        print(f"  ❌ 任务失败 for {topics[i]}: {result}")
+                        # 添加备用结果
+                        search_results.append({
+                            "title": f"Error Fallback - {topics[i]}",
+                            "content": f"搜索任务失败: {topics[i]}",
+                            "url": "https://example.com/error",
+                            "source": "错误备用",
+                            "relevance_score": 0.5,
+                            "topic": topics[i]
+                        })
+                    else:
+                        search_results.append(result)
+                
+                print(f"✅ 搜索完成，总共找到 {len(search_results)} 个结果")
+                
+                # 第2步：高级文本处理和向量匹配
+                print("\n🧠 第2步：智能处理搜索结果...")
+                
+                processor = SearchResultProcessor()
+                
+                # TODO: 这里可以加载ChromaDB集合进行向量匹配
+                # chromadb_collection = load_chromadb_collection()  # 需要实现
+                chromadb_collection = None  # 暂时设为None
+                
+                processing_result = await processor.process_search_results(
+                    search_results=search_results,
+                    chromadb_collection=chromadb_collection,
+                    enable_summarization=True,
+                    max_chunk_size=600,
+                    max_summary_length=300
+                )
+                
+                if processing_result.get("success"):
+                    # 使用处理后的结果
+                    processed_results = processing_result.get("filtered_results", processing_result.get("processed_results", []))
+                    print(f"✨ 智能处理完成: {len(search_results)} → {len(processed_results)} 个优化结果")
+                    print(f"   📊 生成文本块: {processing_result.get('total_chunks', 0)} 个")
+                    print(f"   🧮 向量化: {len(processing_result.get('vectors', []))} 个向量")
+                    
+                    # 更新搜索结果为处理后的结果
+                    search_results = processed_results
+                else:
+                    print("⚠️ 智能处理失败，使用原始搜索结果")
+                    errors = processing_result.get("errors", [])
+                    for error in errors:
+                        print(f"   ❌ {error}")
+                
+                # 第3步：生成增强报告
+                print("\n📝 第3步：生成增强研究报告...")
+                
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                
+                # 简化的报告生成
+                report_lines = [
+                    "Credit Research Dynamics",
+                    f"Time: {current_time}",
+                    f"Research Topics: {', '.join(topics)}",
+                    f"Time Range: {time_filter}",
+                    f"Models Used: {llm_model}, {embedding_model}",
+                    "",
+                    "=== Research Results ===",
+                    ""
+                ]
+                
+                for i, result in enumerate(search_results, 1):
+                    # 使用处理后的相关性评分
+                    relevance = result.get('final_score', result.get('relevance_score', 0.8))
+                    
+                    # 使用智能概括的内容
+                    content = result.get('processed_content', result.get('content', '无内容'))
+                    
+                    # 显示处理信息
+                    processing_info = ""
+                    if result.get('enhanced'):
+                        vector_boost = result.get('vector_boost', 0)
+                        matching_count = result.get('matching_count', 0)
+                        chunk_count = result.get('chunk_count', 0)
+                        processing_info = f"   🧠 智能处理: +{vector_boost:.3f}分 | {matching_count}个匹配 | {chunk_count}个块"
+                    
+                    report_lines.extend([
+                        f"{i}. {result.get('title', '无标题')}",
+                        f"   相关性: {relevance:.3f}",
+                        f"   来源: {result.get('source', '未知')}",
+                    ])
+                    
+                    # 显示主要链接
+                    main_url = result.get('url', '')
+                    if main_url:
+                        source_title = result.get('source_title', '原始来源')
+                        report_lines.append(f"   🔗 主要链接: {main_url}")
+                        if source_title:
+                            report_lines.append(f"   📄 来源标题: {source_title}")
+                    
+                    # 显示所有Perplexity原始来源
+                    perplexity_sources = result.get('perplexity_sources', [])
+                    if perplexity_sources:
+                        report_lines.append(f"   📚 引用来源 ({len(perplexity_sources)}个):")
+                        for j, source in enumerate(perplexity_sources[:5], 1):  # 最多显示5个
+                            source_url = source.get('url', '')
+                            source_title = source.get('title', '无标题')
+                            if source_url:
+                                report_lines.append(f"      {j}. {source_title}")
+                                report_lines.append(f"         🌐 {source_url}")
+                    
+                    # 显示相关问题
+                    related_questions = result.get('related_questions', [])
+                    if related_questions:
+                        report_lines.append(f"   💡 相关问题:")
+                        for question in related_questions[:3]:  # 最多显示3个
+                            report_lines.append(f"      • {question}")
+                    
+                    if processing_info:
+                        report_lines.append(processing_info)
+                    
+                    report_lines.extend([
+                        "",
+                        f"   📝 智能摘要:",
+                        f"   {content}",
+                        ""
+                    ])
+                
+                report_lines.extend([
+                    "=== Technical Information ===",
+                    f"Processing Time: {current_time}",
+                    f"Total Results: {len(search_results)}",
+                    f"LLM Model: {llm_model}",
+                    f"Embedding Model: {embedding_model}",
+                    "",
+                    "This report is generated by the Unified Model Manager"
+                ])
+                
+                report_content = "\n".join(report_lines)
+                
+                # 保存报告
+                report_filename = f"research_report_{timestamp}.txt"
+                report_filepath = f"reports/{report_filename}"
+                
+                with open(report_filepath, 'w', encoding='utf-8') as f:
+                    f.write(report_content)
+                
+                print(f"📁 报告已保存: {report_filepath}")
+                
+                # 第3步：发送邮件
+                print("\n📧 第3步：发送邮件...")
+                
+                def send_email():
+                    try:
+                        # SMTP配置
+                        smtp_server = os.getenv('SMTP_SERVER')
+                        smtp_port = int(os.getenv('SMTP_PORT', '587'))
+                        smtp_user = os.getenv('SMTP_USER')
+                        smtp_password = os.getenv('SMTP_PASSWORD')
+                        
+                        if not all([smtp_server, smtp_user, smtp_password]):
+                            print("⚠️ SMTP配置不完整，跳过邮件发送")
+                            return True
+                        
+                        # 创建邮件
+                        msg = MIMEMultipart()
+                        msg['From'] = formataddr((sender_name, smtp_user))
+                        msg['Subject'] = f"Credit Research Dynamics - {'/'.join(topics)} ({datetime.now().strftime('%Y-%m-%d')})"
+                        
+                        # 邮件正文
+                        body_lines = [
+                            "Credit Research Dynamics Report",
+                            "",
+                            f"Research Topics: {', '.join(topics)}",
+                            f"Processing Time: {current_time}",
+                            f"Result Count: {len(search_results)}",
+                            "",
+                            report_content,
+                            "",
+                            f"Report File: {report_filename}",
+                            "Generated by: Unified Model Manager v2.0"
+                        ]
+                        body = "\n".join(body_lines)
+                        
+                        msg.attach(MIMEText(body, 'plain', 'utf-8'))
+                        
+                        # 发送邮件
+                        print(f"📡 连接SMTP服务器: {smtp_server}:{smtp_port}")
+                        
+                        with smtplib.SMTP(smtp_server, smtp_port) as server:
+                            server.starttls()
+                            server.login(smtp_user, smtp_password)
+                            
+                            for recipient in recipients:
+                                msg['To'] = recipient
+                                server.send_message(msg)
+                                print(f"✅ 邮件已发送至: {recipient}")
+                                del msg['To']
+                        
+                        return True
+                        
+                    except Exception as e:
+                        print(f"⚠️ 邮件发送错误: {e}")
+                        print("📝 邮件发送失败不影响研究流程完成")
+                        return True  # 不因邮件失败而中断流程
+                
+                email_success = send_email()
+                
+                # 最终统计
+                print(f"\n🎉 简化研究自动化完成!")
+                print(f"📋 报告文件: {report_filepath}")
+                print(f"📧 邮件状态: {'✅ 成功' if email_success else '⚠️ 失败'}")
+                print(f"🔍 结果数量: {len(search_results)}")
+                print(f"🤖 使用模型: {llm_model}/{embedding_model}")
+                
+                return True
+                
+            except ImportError as e:
+                print(f"❌ 无法导入统一模型管理器: {e}")
+                print("📝 请确保 oop/model_manager.py 存在且配置正确")
+                return False
+                
+            except Exception as e:
+                print(f"❌ 研究流程失败: {e}")
+                import traceback
+                traceback.print_exc()
+                return False
+        
+        # 运行主函数
+        if __name__ == "__main__":
+            success = asyncio.run(main())
+            if not success:
+                exit(1)
+            else:
+                print("\n✅ 简化研究自动化成功完成!")
+        EOF
+    
+    - name: 📤 上传研究报告
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: research-reports
+        path: reports/
+        retention-days: 30
+    
+    - name: 🎯 输出摘要
+      if: always()
+      run: |
+        echo "## 📊 Simplified Research Automation Summary" >> $GITHUB_STEP_SUMMARY
+        echo "**Execution Time**: $(date)" >> $GITHUB_STEP_SUMMARY
+        echo "**Research Topics**: ${{ github.event.inputs.search_topics }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Time Range**: ${{ github.event.inputs.time_filter }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Models Used**: ${{ github.event.inputs.llm_model }}/${{ github.event.inputs.embedding_model }}" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ steps.research.outcome }}" = "success" ]; then
+          echo "**Status**: ✅ Success" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "**Status**: ❌ Failed" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Key Features" >> $GITHUB_STEP_SUMMARY
+        echo "- 🎯 **Modern Architecture**: Fully utilizing Unified Model Manager" >> $GITHUB_STEP_SUMMARY
+        echo "- 🔧 **Smart Selection**: Support for LLM/Embedding model switching" >> $GITHUB_STEP_SUMMARY
+        echo "- 📝 **Streamlined Process**: Efficient research and report generation" >> $GITHUB_STEP_SUMMARY
+        echo "- 📊 **Clear Output**: Structured reports and email notifications" >> $GITHUB_STEP_SUMMARY

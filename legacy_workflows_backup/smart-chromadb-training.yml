@@ -1,0 +1,662 @@
+name: Smart ChromaDB Training with Progress
+
+on:
+  workflow_dispatch:
+    inputs:
+      training_mode:
+        description: 'Training Mode'
+        required: true
+        default: 'incremental'
+        type: choice
+        options:
+          - 'incremental'    # Incremental training
+          - 'full_retrain'   # Full retraining
+          - 'estimate_only'  # Estimate cost only
+      
+      auto_approve:
+        description: 'Auto-approve training (skip cost confirmation)'
+        required: false
+        default: false
+        type: boolean
+      
+      max_token_budget:
+        description: 'Maximum token budget (stops if exceeded)'
+        required: false
+        default: '100000'
+        type: string
+
+env:
+  QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
+
+jobs:
+  analyze-and-estimate:
+    name: 📊 Analyze Files and Estimate Cost
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    outputs:
+      has_files: ${{ steps.analyze.outputs.has_files }}
+      file_count: ${{ steps.analyze.outputs.file_count }}
+      estimated_tokens: ${{ steps.analyze.outputs.estimated_tokens }}
+      estimated_cost: ${{ steps.analyze.outputs.estimated_cost }}
+      new_files_list: ${{ steps.analyze.outputs.new_files_list }}
+      should_proceed: ${{ steps.cost_check.outputs.should_proceed }}
+      analysis_summary: ${{ steps.analyze.outputs.analysis_summary }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install aiofiles tiktoken
+      
+      - name: Analyze files and estimate costs
+        id: analyze
+        run: |
+          cat > analyze_costs.py << 'EOF'
+          import os
+          import json
+          import hashlib
+          import tiktoken
+          from pathlib import Path
+          from datetime import datetime
+
+          def count_tokens(text: str, model: str = "gpt-3.5-turbo") -> int:
+              """Count tokens in text"""
+              try:
+                  encoding = tiktoken.encoding_for_model(model)
+                  return len(encoding.encode(text))
+              except:
+                  # Simple estimation: 1 Chinese character ≈ 1.5 tokens, 1 English word ≈ 1.3 tokens
+                  chinese_chars = len([c for c in text if '\u4e00' <= c <= '\u9fff'])
+                  other_chars = len(text) - chinese_chars
+                  return int(chinese_chars * 1.5 + other_chars * 0.3)
+
+          def estimate_api_costs(token_count: int) -> dict:
+              """Estimate API costs"""
+              # Qwen API pricing estimate (per token)
+              # Text segmentation API: approx. 0.001 CNY/1000 tokens
+              # Vectorization API: approx. 0.0005 CNY/1000 tokens
+              
+              segmentation_cost = (token_count / 1000) * 0.001
+              embedding_cost = (token_count / 1000) * 0.0005
+              total_cost = segmentation_cost + embedding_cost
+              
+              return {
+                  "input_tokens": token_count,
+                  "segmentation_cost_cny": round(segmentation_cost, 4),
+                  "embedding_cost_cny": round(embedding_cost, 4),
+                  "total_cost_cny": round(total_cost, 4),
+                  "total_cost_usd": round(total_cost * 0.14, 4)  # Approximate exchange rate
+              }
+
+          def load_training_state():
+              """Load training state"""
+              state_file = Path("traindb/.training_state.json")
+              if state_file.exists():
+                  with open(state_file, 'r', encoding='utf-8') as f:
+                      return json.load(f)
+              return {"processed_files": {}}
+
+          def analyze_traindb():
+              """Analyze traindb folder"""
+              traindb_path = Path("traindb")
+              
+              if not traindb_path.exists():
+                  return {
+                      "has_files": False,
+                      "file_count": 0,
+                      "estimated_tokens": 0,
+                      "estimated_cost": {},
+                      "new_files": [],
+                      "analysis_details": "traindb folder does not exist"
+                  }
+              
+              # Find supported files
+              supported_formats = ['.txt', '.md', '.pdf', '.docx']
+              all_files = []
+              for fmt in supported_formats:
+                  all_files.extend(traindb_path.glob(f"*{fmt}"))
+              
+              if not all_files:
+                  return {
+                      "has_files": False,
+                      "file_count": 0,
+                      "estimated_tokens": 0,
+                      "estimated_cost": {},
+                      "new_files": [],
+                      "analysis_details": "No supported files found in traindb"
+                  }
+              
+              # Load processed file state
+              training_mode = "${{ github.event.inputs.training_mode }}"
+              if training_mode == "full_retrain":
+                  processed_hashes = set()
+              else:
+                  state = load_training_state()
+                  processed_hashes = set(state.get("processed_files", {}).keys())
+              
+              # Analyze new files
+              new_files = []
+              total_tokens = 0
+              analysis_details = []
+              
+              for file_path in all_files:
+                  try:
+                      # Calculate file hash
+                      file_hash = hashlib.md5(file_path.read_bytes()).hexdigest()
+                      
+                      # Check if processing is needed
+                      if file_hash in processed_hashes:
+                          analysis_details.append(f"⏭️ Skipping processed: {file_path.name}")
+                          continue
+                      
+                      # Read file content
+                      if file_path.suffix.lower() in ['.txt', '.md']:
+                          content = file_path.read_text(encoding='utf-8')
+                      else:
+                          # PDF/DOCX need special handling, estimate here using file size
+                          file_size = file_path.stat().st_size
+                          estimated_chars = file_size * 0.5  # Estimated characters
+                          content = "X" * int(estimated_chars)  # For token calculation
+                      
+                      # Calculate tokens
+                      file_tokens = count_tokens(content)
+                      total_tokens += file_tokens
+                      
+                      file_info = {
+                          "name": file_path.name,
+                          "size_bytes": file_path.stat().st_size,
+                          "estimated_tokens": file_tokens,
+                          "file_hash": file_hash[:8]
+                      }
+                      
+                      new_files.append(file_info)
+                      analysis_details.append(f"🆕 To process: {file_path.name} ({file_tokens:,} tokens)")
+                      
+                  except Exception as e:
+                      analysis_details.append(f"❌ Failed to read: {file_path.name} - {str(e)}")
+              
+              # Calculate cost estimate
+              cost_estimate = estimate_api_costs(total_tokens)
+              
+              return {
+                  "has_files": len(new_files) > 0,
+                  "file_count": len(new_files),
+                  "total_files": len(all_files),
+                  "estimated_tokens": total_tokens,
+                  "estimated_cost": cost_estimate,
+                  "new_files": new_files,
+                  "analysis_details": analysis_details
+              }
+
+          def main():
+              print("📊 Starting traindb folder analysis...")
+              
+              result = analyze_traindb()
+              
+              # Output analysis results
+              print(f"\n📁 File analysis results:")
+              print(f"   Total files: {result.get('total_files', 0)}")
+              print(f"   Files to process: {result['file_count']}")
+              print(f"   Estimated tokens: {result['estimated_tokens']:,}")
+              
+              if result['estimated_cost']:
+                  cost = result['estimated_cost']
+                  print(f"\n💰 Cost Estimation:")
+                  print(f"   Input tokens: {cost['input_tokens']:,}")
+                  print(f"   Text Segmentation Cost: ¥{cost['segmentation_cost_cny']}")
+                  print(f"   Embedding Cost: ¥{cost['embedding_cost_cny']}")
+                  print(f"   Total Cost: ¥{cost['total_cost_cny']} (≈${cost['total_cost_usd']})")
+              
+              print(f"\n📋 Detailed Analysis:")
+              for detail in result.get('analysis_details', []):
+                  print(f"   {detail}")
+              
+              # Set GitHub Actions output
+              print(f"::set-output name=has_files::{str(result['has_files']).lower()}")
+              print(f"::set-output name=file_count::{result['file_count']}")
+              print(f"::set-output name=estimated_tokens::{result['estimated_tokens']}")
+              print(f"::set-output name=estimated_cost::{json.dumps(result['estimated_cost'])}")
+              print(f"::set-output name=new_files_list::{json.dumps(result['new_files'])}")
+              
+              # Generate analysis summary
+              summary = {
+                  "training_mode": "${{ github.event.inputs.training_mode }}",
+                  "total_files": result.get('total_files', 0),
+                  "new_files": result['file_count'],
+                  "estimated_tokens": result['estimated_tokens'],
+                  "estimated_cost_cny": result['estimated_cost'].get('total_cost_cny', 0),
+                  "timestamp": datetime.now().isoformat()
+              }
+              
+              print(f"::set-output name=analysis_summary::{json.dumps(summary)}")
+              
+              return result
+
+          if __name__ == "__main__":
+              main()
+          EOF
+          
+          python analyze_costs.py
+      
+      - name: Cost approval check
+        id: cost_check
+        run: |
+          estimated_tokens="${{ steps.analyze.outputs.estimated_tokens }}"
+          max_budget="${{ github.event.inputs.max_token_budget }}"
+          auto_approve="${{ github.event.inputs.auto_approve }}"
+          training_mode="${{ github.event.inputs.training_mode }}"
+          
+          echo "🔍 Cost check:"
+          echo "   Estimated tokens: $estimated_tokens"
+          echo "   Budget limit: $max_budget"
+          echo "   Auto-approve: $auto_approve"
+          echo "   Training mode: $training_mode"
+          
+          # If only in estimation mode, no need to proceed
+          if [ "$training_mode" = "estimate_only" ]; then
+            echo "📊 Estimate-only mode, no training execution"
+            echo "should_proceed=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Check if there are files to process
+          if [ "${{ steps.analyze.outputs.has_files }}" != "true" ]; then
+            echo "📂 No files to process"
+            echo "should_proceed=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Check budget limit
+          if [ "$estimated_tokens" -gt "$max_budget" ]; then
+            echo "💰 Estimated tokens ($estimated_tokens) exceed budget ($max_budget)"
+            echo "should_proceed=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Auto-approve or manual confirmation
+          if [ "$auto_approve" = "true" ]; then
+            echo "✅ Auto-approved, proceeding with training"
+            echo "should_proceed=true" >> $GITHUB_OUTPUT
+          else
+            echo "⏸️ Manual confirmation required, please review cost estimate and rerun"
+            echo "should_proceed=manual_approval_needed" >> $GITHUB_OUTPUT
+          fi
+
+  manual-approval:
+    name: 🤔 Waiting for User Confirmation
+    runs-on: ubuntu-latest
+    needs: analyze-and-estimate
+    if: ${{ needs.analyze-and-estimate.outputs.should_proceed == 'manual_approval_needed' }}
+    timeout-minutes: 1
+    
+    steps:
+      - name: Display cost summary and wait for approval
+        run: |
+          cat << 'EOF'
+          
+          💰 Cost estimation complete, please confirm to continue
+          ====================================
+          
+          📊 Training Overview:
+          - File Count: ${{ needs.analyze-and-estimate.outputs.file_count }}
+          - Estimated Tokens: ${{ needs.analyze-and-estimate.outputs.estimated_tokens }}
+          - Estimated Cost: ¥${{ fromJson(needs.analyze-and-estimate.outputs.estimated_cost).total_cost_cny }}
+          
+          📋 To continue training, please:
+          1. Confirm the above costs are acceptable
+          2. Rerun this workflow
+          3. Select "Auto-approve training" option
+          
+          💡 Or set a higher token budget limit
+          
+          EOF
+          
+          # This job will fail, prompting the user to rerun
+          echo "❌ Waiting for user to manually confirm cost before rerunning"
+          exit 1
+
+  execute-training:
+    name: 🚀 Execute ChromaDB Training
+    runs-on: ubuntu-latest
+    needs: analyze-and-estimate
+    if: ${{ needs.analyze-and-estimate.outputs.should_proceed == 'true' }}
+    timeout-minutes: 45
+    
+    outputs:
+      training_result: ${{ steps.train.outputs.result }}
+      chromadb_version: ${{ steps.train.outputs.version }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install aiofiles aiohttp tiktoken
+      
+      - name: Initialize progress tracking
+        run: |
+          echo "🎯 Starting training preparation..."
+          echo "file_count=${{ needs.analyze-and-estimate.outputs.file_count }}" >> $GITHUB_ENV
+          echo "estimated_tokens=${{ needs.analyze-and-estimate.outputs.estimated_tokens }}" >> $GITHUB_ENV
+          
+          # Create progress file
+          cat > progress.json << EOF
+          {
+            "total_files": ${{ needs.analyze-and-estimate.outputs.file_count }},
+            "processed_files": 0,
+            "total_estimated_tokens": ${{ needs.analyze-and-estimate.outputs.estimated_tokens }},
+            "processed_tokens": 0,
+            "current_file": "",
+            "status": "initializing"
+          }
+          EOF
+      
+      - name: Execute training with progress tracking
+        id: train
+        run: |
+          cat > train_with_progress.py << 'EOF'
+          import asyncio
+          import json
+          import os
+          import sys
+          import hashlib
+          import random
+          import tiktoken
+          from pathlib import Path
+          from datetime import datetime
+
+          class ProgressTracker:
+              def __init__(self, total_files, total_tokens):
+                  self.total_files = total_files
+                  self.total_tokens = total_tokens
+                  self.processed_files = 0
+                  self.processed_tokens = 0
+                  self.current_file = ""
+                  
+              def update_file_progress(self, filename, tokens_processed=0):
+                  self.current_file = filename
+                  self.processed_tokens += tokens_processed
+                  
+                  # Calculate progress percentage
+                  file_progress = (self.processed_files / self.total_files) * 100 if self.total_files > 0 else 0
+                  token_progress = (self.processed_tokens / self.total_tokens) * 100 if self.total_tokens > 0 else 0
+                  
+                  # Display progress bar
+                  self._show_progress_bar(file_progress, f"File Progress ({self.processed_files}/{self.total_files})")
+                  self._show_progress_bar(token_progress, f"Token Progress ({self.processed_tokens:,}/{self.total_tokens:,})")
+                  
+                  print(f"📄 Currently processing: {filename}")
+                  print()
+              
+              def complete_file(self):
+                  self.processed_files += 1
+                  
+              def _show_progress_bar(self, percentage, label, width=50):
+                  filled = int(width * percentage / 100)
+                  bar = '█' * filled + '▒' * (width - filled)
+                  print(f"{label}: |{bar}| {percentage:.1f}%")
+
+          class MockQwenClient:
+              def __init__(self):
+                  self.api_calls = 0
+                  self.total_tokens_processed = 0
+              
+              async def intelligent_segmentation(self, text: str, max_chunk_size: int = 800):
+                  self.api_calls += 1
+                  
+                  # Calculate actual token count
+                  try:
+                      encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
+                      tokens = len(encoding.encode(text))
+                  except:
+                      tokens = len(text)  # Simple estimation
+                  
+                  self.total_tokens_processed += tokens
+                  
+                  print(f"   🔧 API Call {self.api_calls}: Text Segmentation ({tokens:,} tokens)")
+                  
+                  # Simulate processing time
+                  await asyncio.sleep(0.5)
+                  
+                  # Simple segmentation
+                  sentences = text.split('。')
+                  chunks = []
+                  current_chunk = ""
+                  
+                  for sentence in sentences:
+                      if len(current_chunk + sentence) <= max_chunk_size:
+                          current_chunk += sentence + "。"
+                      else:
+                          if current_chunk:
+                              chunks.append(current_chunk.strip())
+                          current_chunk = sentence + "。"
+                  
+                  if current_chunk:
+                      chunks.append(current_chunk.strip())
+                  
+                  return [chunk for chunk in chunks if len(chunk.strip()) > 10]
+              
+              async def create_embeddings(self, texts: list):
+                  self.api_calls += 1
+                  
+                  # Calculate vectorized token count
+                  total_tokens = sum(len(text) for text in texts)
+                  self.total_tokens_processed += total_tokens
+                  
+                  print(f"   🔧 API Call {self.api_calls}: Vectorizing {len(texts)} text chunks ({total_tokens:,} tokens)")
+                  
+                  # Simulate processing time
+                  await asyncio.sleep(1.0)
+                  
+                  embeddings = []
+                  for text in texts:
+                      embedding = [random.random() for _ in range(1536)]
+                      embeddings.append(embedding)
+                  
+                  return {"embeddings": embeddings}
+
+          async def main():
+              print("🚀 Starting ChromaDB training...")
+              
+              # Load analysis results
+              new_files = json.loads('${{ needs.analyze-and-estimate.outputs.new_files_list }}')
+              estimated_tokens = int('${{ needs.analyze-and-estimate.outputs.estimated_tokens }}')
+              
+              if not new_files:
+                  print("❌ No files to process")
+                  return {"status": "no_files"}
+              
+              # Initialize progress tracking
+              progress = ProgressTracker(len(new_files), estimated_tokens)
+              
+              # Initialize API client
+              qwen_client = MockQwenClient()
+              
+              print(f"📊 Training Overview:")
+              print(f"   File Count: {len(new_files)}")
+              print(f"   Estimated tokens: {estimated_tokens:,}")
+              print(f"   Training Mode: ${{ github.event.inputs.training_mode }}")
+              print()
+              
+              # Process each file
+              processed_records = []
+              
+              for i, file_info in enumerate(new_files, 1):
+                  filename = file_info['name']
+                  file_tokens = file_info['estimated_tokens']
+                  
+                  print(f"📁 Starting to process file {i}/{len(new_files)}: {filename}")
+                  progress.update_file_progress(filename)
+                  
+                  try:
+                      # Read file
+                      file_path = Path(f"traindb/{filename}")
+                      if not file_path.exists():
+                          print(f"   ❌ File does not exist: {filename}")
+                          continue
+                      
+                      if file_path.suffix.lower() in ['.txt', '.md']:
+                          content = file_path.read_text(encoding='utf-8')
+                      else:
+                          content = f"Simulated content processing: {filename}"
+                      
+                      if not content.strip():
+                          print(f"   ⏭️ File is empty, skipping: {filename}")
+                          continue
+                      
+                      # Text segmentation
+                      print(f"   🔄 Step 1/2: Text segmentation...")
+                      chunks = await qwen_client.intelligent_segmentation(content)
+                      
+                      if not chunks:
+                          print(f"   ⚠️ Segmentation result is empty: {filename}")
+                          continue
+                      
+                      # Vectorization
+                      print(f"   🔄 Step 2/2: Generating vectors...")
+                      embeddings_result = await qwen_client.create_embeddings(chunks)
+                      
+                      # Update progress
+                      progress.update_file_progress(filename, file_tokens)
+                      
+                      # Record result
+                      record = {
+                          "file_path": str(file_path),
+                          "file_hash": file_info['file_hash'],
+                          "processed_at": datetime.now().isoformat(),
+                          "chunks_count": len(chunks),
+                          "file_size_bytes": file_info['size_bytes'],
+                          "tokens_processed": file_tokens,
+                          "status": "processed"
+                      }
+                      
+                      processed_records.append(record)
+                      progress.complete_file()
+                      
+                      print(f"   ✅ Complete: {filename} ({len(chunks)} chunks, {file_tokens:,} tokens)")
+                      print()
+                      
+                  except Exception as e:
+                      print(f"   ❌ Processing failed: {filename} - {str(e)}")
+                      continue
+              
+              # Generate final results
+              version = f"smart_v{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+              
+              final_result = {
+                  "status": "success",
+                  "chromadb_version": version,
+                  "processed_files": len(processed_records),
+                  "total_chunks": sum(r['chunks_count'] for r in processed_records),
+                  "api_calls_used": qwen_client.api_calls,
+                  "tokens_processed": qwen_client.total_tokens_processed,
+                  "estimated_tokens": estimated_tokens,
+                  "processing_efficiency": (qwen_client.total_tokens_processed / estimated_tokens * 100) if estimated_tokens > 0 else 0
+              }
+              
+              print(f"🎉 Training complete!")
+              print(f"   Version: {version}")
+              print(f"   Processed files: {len(processed_records)}")
+              print(f"   Generated chunks: {final_result['total_chunks']}")
+              print(f"   API calls: {qwen_client.api_calls}")
+              print(f"   Actual tokens: {qwen_client.total_tokens_processed:,}")
+              print(f"   Estimated accuracy: {final_result['processing_efficiency']:.1f}%")
+              
+              # Output results to GitHub Actions
+              print(f"::set-output name=result::{json.dumps(final_result)}")
+              print(f"::set-output name=version::{version}")
+              
+              return final_result
+
+          if __name__ == "__main__":
+              asyncio.run(main())
+          EOF
+          
+          python train_with_progress.py
+        env:
+          QWEN_API_KEY: ${{ env.QWEN_API_KEY }}
+      
+      - name: Training completion summary
+        run: |
+          echo "✅ Training execution complete!"
+          
+          result='${{ steps.train.outputs.result }}'
+          if [ "$result" != "" ]; then
+            echo "🎯 Training Result Summary:"
+            echo "$result" | jq '.'
+          fi
+
+  final-report:
+    name: 📊 Generate Final Report
+    runs-on: ubuntu-latest
+    needs: [analyze-and-estimate, execute-training]
+    if: always()
+    timeout-minutes: 5
+    
+    steps:
+      - name: Generate comprehensive report
+        run: |
+          cat << 'EOF'
+          
+          🎯 Smart ChromaDB Training Completion Report
+          ========================================
+          
+          📊 Execution Status:
+          - Cost Analysis: ${{ needs.analyze-and-estimate.result }}
+          - Training Execution: ${{ needs.execute-training.result }}
+          
+          📁 File Analysis:
+          - Files to Process: ${{ needs.analyze-and-estimate.outputs.file_count }}
+          - Estimated Tokens: ${{ needs.analyze-and-estimate.outputs.estimated_tokens }}
+          - Estimated Cost: ¥${{ fromJson(needs.analyze-and-estimate.outputs.estimated_cost).total_cost_cny }}
+          
+          🎯 Training Results:
+          EOF
+          
+          if [ "${{ needs.execute-training.result }}" = "success" ]; then
+            result='${{ needs.execute-training.outputs.training_result }}'
+            echo "   ChromaDB Version: ${{ needs.execute-training.outputs.chromadb_version }}"
+            echo "   Training Status: Successfully completed ✅"
+            
+            if [ "$result" != "" ]; then
+              echo "$result" | jq -r '"   Processed Files: \(.processed_files)"'
+              echo "$result" | jq -r '"   Generated Chunks: \(.total_chunks)"'
+              echo "$result" | jq -r '"   API Calls: \(.api_calls_used)"'
+              echo "$result" | jq -r '"   Actual Tokens: \(.tokens_processed)"'
+              echo "$result" | jq -r '"   Estimated Accuracy: \(.processing_efficiency)%"'
+            fi
+          else
+            echo "   Training Status: ${{ needs.execute-training.result }}"
+          fi
+          
+          echo ""
+          echo "💡 Usage Suggestions:"
+          echo "   - Cost estimation feature helps control API consumption"
+          echo "   - Supports both manual confirmation and automatic approval modes"
+          echo "   - Real-time progress tracking displays processing status"
+          echo "   - Can set token budget limit to prevent overspending"
+          
+          echo ""
+          echo "🔄 Next Steps:"
+          echo "   - estimate_only: View cost estimate only"
+          echo "   - auto_approve: Skip manual confirmation"
+          echo "   - max_token_budget: Set budget limit"
+ 
+ 
+ 

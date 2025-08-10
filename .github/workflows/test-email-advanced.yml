@@ -1,0 +1,104 @@
+name: Advanced Email SMTP Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_message:
+        description: 'Message to send in the test email'
+        required: false
+        default: 'Advanced SMTP diagnostic test from Credit Research system.'
+      recipient_email:
+        description: 'Recipient email address (leave blank to use SMTP_USER)'
+        required: false
+        default: ''
+      smtp_server_override:
+        description: 'Override SMTP server (leave blank to use secret)'
+        required: false
+        default: ''
+      smtp_port_override:
+        description: 'Override SMTP port (leave blank to use secret)'
+        required: false
+        default: ''
+
+jobs:
+  test-email-advanced:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Make test script executable
+        run: chmod +x scripts/test_email_advanced.py
+
+      - name: Environment Diagnostics
+        run: |
+          echo "🔍 Environment Information:"
+          echo "  - Runner OS: ${{ runner.os }}"
+          echo "  - GitHub Actions: ${{ env.GITHUB_ACTIONS }}"
+          echo "  - Working Directory: $(pwd)"
+          echo "  - Public IP: $(curl -s https://api.ipify.org || echo 'Failed to get IP')"
+          echo "  - DNS Resolution Test:"
+          nslookup smtp.office365.com || echo "DNS lookup failed"
+
+      - name: Network Connectivity Test
+        run: |
+          echo "🌐 Testing network connectivity to common SMTP servers:"
+          
+          # Test Outlook/Office365
+          echo "Testing Outlook SMTP (smtp.office365.com:587):"
+          timeout 10 bash -c '</dev/tcp/smtp.office365.com/587' && echo "✅ Reachable" || echo "❌ Not reachable"
+          
+          # Test Gmail
+          echo "Testing Gmail SMTP (smtp.gmail.com:587):"
+          timeout 10 bash -c '</dev/tcp/smtp.gmail.com/587' && echo "✅ Reachable" || echo "❌ Not reachable"
+          
+          # Test QQ
+          echo "Testing QQ SMTP (smtp.qq.com:587):"
+          timeout 10 bash -c '</dev/tcp/smtp.qq.com/587' && echo "✅ Reachable" || echo "❌ Not reachable"
+
+      - name: Advanced Email Test
+        env:
+          TEST_MESSAGE: ${{ github.event.inputs.test_message || 'Advanced SMTP diagnostic test from Credit Research system.' }}
+          RECIPIENT_EMAIL: ${{ github.event.inputs.recipient_email || '' }}
+          SENDER_NAME: 'Credit Research Bot (Advanced Test)'
+
+          # SMTP Configuration - use overrides if provided, otherwise use secrets
+          SMTP_SERVER: ${{ github.event.inputs.smtp_server_override || secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ github.event.inputs.smtp_port_override || secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+
+        run: python3 scripts/test_email_advanced.py
+
+      - name: Test Summary and Recommendations
+        run: |
+          echo "📧 Advanced Email Test Completed"
+          echo ""
+          echo "🔧 Next Steps Based on Results:"
+          echo ""
+          echo "✅ If test PASSED:"
+          echo "   - Your SMTP configuration is correct"
+          echo "   - The main workflow should work for email sending"
+          echo ""
+          echo "❌ If test FAILED:"
+          echo "   - Check the detailed logs above for specific errors"
+          echo "   - Common issues:"
+          echo "     • Authentication: Wrong password or need app-specific password"
+          echo "     • Network: Cloud servers blocked by email provider"
+          echo "     • Configuration: Wrong server/port combination"
+          echo ""
+          echo "🌩️ Cloud Environment Limitations:"
+          echo "   - Many email providers block GitHub Actions IP ranges"
+          echo "   - Consider using dedicated email APIs (SendGrid, Mailgun, SES)"
+          echo "   - Or use a VPS/dedicated server for email sending"
+          echo ""
+          echo "📋 Alternative Solutions:"
+          echo "   - SendGrid: Free tier available, cloud-friendly"
+          echo "   - Mailgun: Reliable for transactional emails"
+          echo "   - Amazon SES: Cost-effective for high volume"
+          echo "   - Use webhook notifications instead of email"

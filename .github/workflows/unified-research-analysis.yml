@@ -1,0 +1,151 @@
+name: Unified Research Analysis
+
+on:
+  workflow_dispatch:
+    inputs:
+      topics:
+        description: 'Research topics (comma-separated)'
+        required: true
+        default: 'credit rating methodology'
+      search_query_template:
+        description: 'Search query template with {topic} placeholder'
+        required: false
+        default: '{topic} research analysis report'
+      enable_vectorization:
+        description: 'Enable vector enhancement'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+      early_stop_threshold:
+        description: 'ChromaDB score threshold for early completion (0.3-0.98)'
+        required: false
+        default: '0.85'
+        type: string
+      max_search_requests:
+        description: 'Maximum search requests per workflow (1-5)'
+        required: false
+        default: '5'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+          - '5'
+      embedding_model:
+        description: 'Embedding model alias'
+        required: false
+        default: 'text-embedding-3-small'
+      strict_time_filter:
+        description: '启用严格7天时间限制 (仅返回最近7天内的结果)'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+      recipient_email:
+        description: 'Email recipient (optional)'
+        required: false
+        default: ''
+      sender_name:
+        description: 'Email sender name'
+        required: false
+        default: 'Credit Research Bot'
+
+env:
+  TOPICS: ${{ github.event.inputs.topics || 'credit rating methodology' }}
+  SEARCH_QUERY_TEMPLATE: ${{ github.event.inputs.search_query_template || '{topic} research analysis report' }}
+  ENABLE_VECTORIZATION: ${{ github.event.inputs.enable_vectorization || 'true' }}
+  EARLY_STOP_THRESHOLD: ${{ github.event.inputs.early_stop_threshold || '0.85' }}
+  MAX_SEARCH_REQUESTS: ${{ github.event.inputs.max_search_requests || '5' }}
+  EMBEDDING_MODEL: ${{ github.event.inputs.embedding_model || 'text-embedding-3-small' }}
+  STRICT_TIME_FILTER: ${{ github.event.inputs.strict_time_filter || 'true' }}
+  RECIPIENT_EMAIL: ${{ github.event.inputs.recipient_email || '' }}
+  SENDER_NAME: ${{ github.event.inputs.sender_name || 'Credit Research Bot' }}
+  
+  # API Keys
+  QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
+  PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  
+  # Email Configuration
+  SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+  SMTP_PORT: ${{ secrets.SMTP_PORT }}
+  SMTP_USER: ${{ secrets.SMTP_USER }}
+  SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+
+jobs:
+  unified-research-analysis:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 🚀 Checkout Repository
+      uses: actions/checkout@v4
+    
+    - name: 🐍 Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: 📦 Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests urllib3 aiofiles python-dotenv numpy chromadb httpx openai
+    
+    - name: 📁 Create Reports Directory
+      run: |
+        mkdir -p reports
+        echo "✅ Reports directory created"
+    
+    - name: 🔍 Debug Environment
+      run: |
+        echo "Current working directory: $(pwd)"
+        echo "Python version: $(python3 --version)"
+        echo "Available files:"
+        ls -la
+        echo "OOP directory contents:"
+        ls -la oop/ || echo "oop directory not found"
+        echo "Scripts directory contents:"
+        ls -la scripts/ || echo "scripts directory not found"
+    
+    - name: 🎯 Execute Analysis
+      id: research
+      run: |
+        # Make script executable
+        chmod +x scripts/unified_research_analysis.py
+        # Run with proper error handling
+        python3 scripts/unified_research_analysis.py
+      continue-on-error: false
+    
+    - name: 📄 Upload Reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: unified-research-reports-${{ github.run_number }}
+        path: |
+          reports/
+          *.json
+          *.md
+        retention-days: 30
+    
+    - name: 📊 Generate Summary
+      if: always()
+      run: |
+        echo "## 🎯 Unified Research Analysis Summary" >> $GITHUB_STEP_SUMMARY
+        echo "**Run ID**: ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Topics**: ${{ env.TOPICS }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Vector Enhancement**: ${{ env.ENABLE_VECTORIZATION }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Timestamp**: $(date)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "📁 **Reports**: Available in workflow artifacts" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -f "reports/unified_research_*.md" ]; then
+          echo "📋 **Latest Report Preview**:" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          head -20 reports/unified_research_*.md | tail -15 >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+        fi

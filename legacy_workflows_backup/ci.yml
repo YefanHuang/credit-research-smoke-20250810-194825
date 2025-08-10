@@ -1,0 +1,40 @@
+name: Credit Research Automation
+
+on:
+  workflow_dispatch:
+  # schedule:
+    # - cron: '0 2 1,8,15,22 * *'  # 4 times a month (10 AM Beijing Time) (Disabled)
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Perplexity API search
+        run: python scripts/search_perplexity.py
+        env:
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+
+      - name: Run ChromaDB vector filtering
+        run: python scripts/filter_with_chromadb.py
+        env:
+          QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
+
+      - name: Send email with results
+        run: python scripts/send_email.py
+        env:
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }} 

@@ -1,0 +1,227 @@
+name: 🧪 Test Text Segmentation & Embedding
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_text:
+        description: 'Text to test segmentation and embedding'
+        required: false
+        default: 'Credit risk management involves identifying, assessing, and mitigating potential financial losses from borrower defaults. Financial institutions implement comprehensive frameworks including credit scoring, portfolio diversification, and regulatory compliance. Modern approaches integrate machine learning algorithms with traditional risk assessment methodologies to enhance predictive accuracy and operational efficiency.'
+        type: string
+      
+      max_chunk_size:
+        description: 'Maximum chunk size for segmentation'
+        required: false
+        default: '300'
+        type: string
+
+env:
+  QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
+  PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+
+jobs:
+  test-segmentation-embedding:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+    - name: 📥 Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: 🐍 Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: 📦 Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests urllib3 aiofiles asyncio python-dotenv httpx chromadb numpy openai
+        if [ -f requirements.txt ]; then
+          pip install -r requirements.txt
+        fi
+    
+    - name: 🔧 Execute Segmentation & Embedding Test
+      id: segmentation_test
+      run: |
+        python3 << 'EOF'
+        import asyncio
+        import sys
+        import os
+        from typing import List, Dict, Any
+
+        # Add oop directory to path
+        possible_paths = [
+            '/github/workspace/oop',
+            './oop',
+            '../oop',
+            os.path.join(os.getcwd(), 'oop')
+        ]
+        
+        model_manager_imported = False
+        for path in possible_paths:
+            try:
+                if os.path.exists(path):
+                    print(f"🔍 Trying path: {path}")
+                    sys.path.insert(0, path)
+                    from model_manager import call_llm, call_embedding, get_model_status
+                    print("✅ Model manager imported successfully")
+                    model_manager_imported = True
+                    break
+            except ImportError as e:
+                print(f"⚠️ Failed to import from {path}: {e}")
+                continue
+        
+        if not model_manager_imported:
+            print("❌ Failed to import model manager")
+            sys.exit(1)
+
+        async def intelligent_segmentation_llm(text: str, max_chunk_size: int = 300) -> List[str]:
+            """智能文本切分 - 使用LLM模型"""
+            try:
+                prompt = f"""Please intelligently segment the following text into semantically complete paragraphs, with each segment not exceeding {max_chunk_size} characters:
+
+        {text[:2000]}
+
+        Requirements:
+        1. Maintain semantic integrity and coherence
+        2. Keep each segment under {max_chunk_size} characters  
+        3. Preserve credit research technical terms and key information
+        4. Segment by logical topics (e.g., policy analysis, technology development, market data)
+        5. Remove reference numbers at the end of sentences or paragraphs
+        6. Clean up text transitions
+        7. Return format: one segment per line, separated by "---"
+
+        Ensure output is in English.
+        """
+                
+                print(f"🔧 调用LLM模型进行智能文本切分...")
+                result = await call_llm(prompt, model_alias="llm", max_tokens=2000, temperature=0.1)
+                
+                if result.get('success'):
+                    response_text = result.get('content', '')
+                    print(f"📊 LLM API响应: 模型={result.get('model', 'unknown')}, 提供商={result.get('provider', 'unknown')}")
+                    
+                    chunks = [chunk.strip() for chunk in response_text.split("---") if chunk.strip()]
+                    
+                    if chunks and len(chunks) > 0:
+                        print(f"✅ LLM智能切分完成: {len(text)} 字符 → {len(chunks)} 个语义块")
+                        for i, chunk in enumerate(chunks):
+                            print(f"  📄 块{i+1} ({len(chunk)}字符): {chunk[:100]}...")
+                        return chunks
+                    else:
+                        print("⚠️ LLM切分返回空结果")
+                else:
+                    print(f"❌ LLM切分调用失败: {result.get('error', 'Unknown error')}")
+                    
+            except Exception as e:
+                print(f"⚠️ LLM切分异常: {e}")
+            
+            return []
+
+        async def test_embedding(texts: List[str]) -> Dict[str, Any]:
+            """测试向量化"""
+            try:
+                print(f"🔧 调用embedding模型进行向量化...")
+                print(f"🔍 使用模型: alias='embedding' (应映射到text-embedding-v4)")
+                
+                result = await call_embedding(texts, model_alias="embedding")
+                
+                if result.get('success'):
+                    embeddings = result.get('embeddings', [])
+                    print(f"✅ 向量化成功: {len(texts)} 个文本 → {len(embeddings)} 个向量")
+                    print(f"📊 使用模型: {result.get('model', 'unknown')} (提供商: {result.get('provider', 'unknown')})")
+                    
+                    if embeddings:
+                        print(f"📏 向量维度: {len(embeddings[0]) if embeddings[0] else 0}")
+                    
+                    return result
+                else:
+                    print(f"❌ 向量化失败: {result.get('error', 'Unknown error')}")
+                    return {"success": False, "error": result.get('error', 'Unknown error')}
+                    
+            except Exception as e:
+                print(f"⚠️ 向量化异常: {e}")
+                return {"success": False, "error": str(e)}
+
+        async def main():
+            print("🧪 Text Segmentation & Embedding Test")
+            print("=" * 50)
+            
+            # Check model status
+            print("\n🤖 Model Status Check:")
+            try:
+                status = get_model_status()
+                for alias, info in status.items():
+                    available = "✅" if info["available"] else "❌"
+                    print(f"  {available} {alias}: {info['provider']}-{info['model_id']} ({info['type']})")
+            except Exception as e:
+                print(f"⚠️ Model status check failed: {e}")
+            
+            # Test parameters
+            test_text = """${{ github.event.inputs.test_text }}"""
+            max_chunk_size = int("${{ github.event.inputs.max_chunk_size || '300' }}")
+            
+            print(f"\n📝 Test Text ({len(test_text)} characters):")
+            print(f"  {test_text[:200]}...")
+            print(f"\n⚙️ Max Chunk Size: {max_chunk_size}")
+            
+            # Step 1: Text Segmentation
+            print(f"\n🔸 Step 1: Intelligent Text Segmentation")
+            chunks = await intelligent_segmentation_llm(test_text, max_chunk_size)
+            
+            if not chunks:
+                print("❌ Segmentation failed, test cannot continue")
+                return False
+            
+            # Step 2: Embedding
+            print(f"\n🔸 Step 2: Vector Embedding")
+            embedding_result = await test_embedding(chunks)
+            
+            if embedding_result.get('success'):
+                print("\n✅ Complete Test Summary:")
+                print(f"  📝 Original Text: {len(test_text)} characters")
+                print(f"  ✂️ Segmentation: {len(chunks)} chunks")
+                print(f"  🧠 Embedding: {len(embedding_result.get('embeddings', []))} vectors")
+                print(f"  📊 Model Used: {embedding_result.get('model', 'unknown')}")
+                return True
+            else:
+                print(f"\n❌ Test Failed at embedding step: {embedding_result.get('error', 'Unknown error')}")
+                return False
+
+        # Run the test
+        try:
+            success = asyncio.run(main())
+            if not success:
+                sys.exit(1)
+        except Exception as e:
+            print(f"❌ Test execution failed: {e}")
+            sys.exit(1)
+        EOF
+    
+    - name: 📋 Generate Test Summary
+      if: always()
+      run: |
+        # Calculate text length using a safer method
+        TEST_TEXT="${{ github.event.inputs.test_text }}"
+        TEXT_LENGTH=${#TEST_TEXT}
+        
+        echo "## 🧪 Text Segmentation & Embedding Test Results" >> $GITHUB_STEP_SUMMARY
+        echo "**Test Time**: $(date)" >> $GITHUB_STEP_SUMMARY
+        echo "**Input Text Length**: $TEXT_LENGTH characters" >> $GITHUB_STEP_SUMMARY
+        echo "**Max Chunk Size**: ${{ github.event.inputs.max_chunk_size || '300' }}" >> $GITHUB_STEP_SUMMARY
+        
+        # Check the exit code of the previous step
+        if [ "${{ steps.segmentation_test.outcome }}" = "success" ]; then
+          echo "**Test Status**: ✅ Success" >> $GITHUB_STEP_SUMMARY
+          echo "Both LLM segmentation and embedding calls worked correctly with OOP model manager." >> $GITHUB_STEP_SUMMARY
+        else
+          echo "**Test Status**: ❌ Failed" >> $GITHUB_STEP_SUMMARY
+          echo "Check logs for detailed error information." >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "This test verifies:" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ LLM model call for intelligent text segmentation" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Embedding model call for vectorization" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ OOP model manager integration" >> $GITHUB_STEP_SUMMARY

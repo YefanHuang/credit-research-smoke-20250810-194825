@@ -1,0 +1,72 @@
+name: smoke-test-isolated
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch: {}
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y graphviz
+
+      - name: Install python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install graphviz
+
+      - name: Test UML Generation
+        run: |
+          echo "=== Testing UML Generator ==="
+          python pictures/UML/uml_generator.py
+          ls -la pictures/UML/output/
+
+      - name: Test DFD Generation
+        run: |
+          echo "=== Testing DFD Generator ==="
+          python pictures/DFD/dfd_generator.py
+          ls -la pictures/DFD/output/
+
+      - name: Upload smoke test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-artifacts
+          path: |
+            pictures/UML/output/**
+            pictures/DFD/output/**
+
+      - name: Generate test summary
+        run: |
+          echo "## 🧪 堆烟测试结果" >> $GITHUB_STEP_SUMMARY
+          echo "### UML 生成测试" >> $GITHUB_STEP_SUMMARY
+          if [ -f "pictures/UML/output/uml_diagram.png" ]; then
+            echo "✅ UML PNG 生成成功" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ UML PNG 生成失败" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -f "pictures/UML/output/analysis_report.json" ]; then
+            echo "✅ UML 分析报告生成成功" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
+            head -20 pictures/UML/output/analysis_report.json >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ UML 分析报告生成失败" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "### DFD 生成测试" >> $GITHUB_STEP_SUMMARY
+          if [ -f "pictures/DFD/output/system_level_dfd.png" ]; then
+            echo "✅ DFD PNG 生成成功" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ DFD PNG 生成失败" >> $GITHUB_STEP_SUMMARY
+          fi

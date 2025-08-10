@@ -1,0 +1,3 @@
+# 客户端SDK依赖 - 非常简单，无ChromaDB复杂依赖！
+httpx>=0.25.0
+asyncio-throttle>=1.0.0  # 可选：API限流

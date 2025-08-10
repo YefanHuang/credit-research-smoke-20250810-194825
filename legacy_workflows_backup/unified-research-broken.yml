@@ -1,0 +1,472 @@
+name: 🎯 统一研究自动化 (新模型管理器)
+
+on:
+  workflow_dispatch:
+    inputs:
+      search_topics:
+        description: '搜索主题 (逗号分隔)'
+        required: true
+        default: '信用风险管理,ESG评级'
+        type: string
+      
+      time_filter:
+        description: '时间过滤器'
+        required: false
+        default: 'week'
+        type: choice
+        options:
+          - week
+          - month
+          - year
+      
+      email_recipients:
+        description: '邮件接收者 (逗号分隔)'
+        required: true
+        default: 'admin@example.com'
+        type: string
+      
+      llm_model:
+        description: 'LLM模型选择'
+        required: false
+        default: 'llm'
+        type: choice
+        options:
+          - llm           # 默认大语言模型
+          - llm-claude    # Claude模型
+          - llm-gpt       # GPT模型
+      
+      embedding_model:
+        description: '向量化模型选择'
+        required: false
+        default: 'embedding'
+        type: choice
+        options:
+          - embedding         # 默认向量化模型
+          - embedding-openai  # OpenAI向量化
+      
+      search_model:
+        description: '搜索模型选择'
+        required: false
+        default: 'search'
+        type: choice
+        options:
+          - search  # Perplexity搜索
+      
+      max_results:
+        description: '最大搜索结果数'
+        required: false
+        default: '50'
+        type: string
+      
+      selection_count:
+        description: '筛选结果数'
+        required: false
+        default: '5'
+        type: string
+      
+      token_limit_search:
+        description: '搜索Token限制'
+        required: false
+        default: '55000'
+        type: string
+      
+      token_limit_embedding:
+        description: '向量化Token限制'
+        required: false
+        default: '100000'
+        type: string
+
+env:
+  PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+  QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
+  CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+  SMTP_PORT: ${{ secrets.SMTP_PORT }}
+  SMTP_USER: ${{ secrets.SMTP_USER }}
+  SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+
+jobs:
+  unified-research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: 📥 检出代码
+      uses: actions/checkout@v4
+    
+    - name: 🐍 设置Python环境
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: 📦 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests urllib3 aiofiles asyncio python-dotenv
+        # 如果有requirements.txt，安装额外依赖
+        if [ -f requirements.txt ]; then
+          pip install -r requirements.txt
+        fi
+    
+    - name: 🎯 执行统一研究流程
+      run: |
+        python3 << 'EOF'
+        import asyncio
+        import sys
+        import os
+        from datetime import datetime
+        from pathlib import Path
+        import json
+        
+        # 添加oop模块路径
+        sys.path.append(os.path.join(os.getcwd(), 'oop'))
+        
+        # 导入统一模型管理器
+        try:
+            from model_manager import (
+                call_llm, call_embedding, call_search, 
+                log_tokens, get_model_status, model_manager,
+                ModelType
+            )
+            print("✅ 统一模型管理器加载成功")
+            UNIFIED_MANAGER_AVAILABLE = True
+        except ImportError as e:
+            print(f"❌ 无法导入统一模型管理器: {e}")
+            UNIFIED_MANAGER_AVAILABLE = False
+            sys.exit(1)
+        
+        # 导入Token监控
+        try:
+            from realtime_token_monitor import init_monitor, start_monitoring, stop_monitoring, log_api_call
+            TOKEN_MONITOR_AVAILABLE = True
+            print("✅ Token监控器加载成功")
+        except ImportError as e:
+            print(f"⚠️ Token监控器不可用: {e}")
+            TOKEN_MONITOR_AVAILABLE = False
+        
+        async def unified_research_flow():
+            """统一研究流程"""
+            
+            # 读取输入参数
+            search_topics = "${{ github.event.inputs.search_topics }}".split(',')
+            time_filter = "${{ github.event.inputs.time_filter }}"
+            email_recipients = "${{ github.event.inputs.email_recipients }}".split(',')
+            llm_model = "${{ github.event.inputs.llm_model }}"
+            embedding_model = "${{ github.event.inputs.embedding_model }}"
+            search_model = "${{ github.event.inputs.search_model }}"
+            max_results = int("${{ github.event.inputs.max_results }}")
+            selection_count = int("${{ github.event.inputs.selection_count }}")
+            token_limit_search = int("${{ github.event.inputs.token_limit_search }}")
+            token_limit_embedding = int("${{ github.event.inputs.token_limit_embedding }}")
+            
+            print("🎯 统一研究自动化开始")
+            print("=" * 50)
+            print(f"🔍 搜索主题: {search_topics}")
+            print(f"⏰ 时间过滤: {time_filter}")
+            print(f"📧 邮件接收者: {email_recipients}")
+            print(f"🤖 LLM模型: {llm_model}")
+            print(f"🧠 向量化模型: {embedding_model}")
+            print(f"🔍 搜索模型: {search_model}")
+            
+            # 检查模型状态
+            print("\n🔍 检查模型状态:")
+            try:
+                model_status = get_model_status()
+                for alias, info in model_status.items():
+                    status_icon = "✅" if info["available"] else "❌"
+                    print(f"  {status_icon} {alias}: {info['provider']}-{info['model_id']} ({info['type']})")
+            except Exception as e:
+                print(f"⚠️ 无法获取模型状态: {e}")
+            
+            # 初始化Token监控
+            if TOKEN_MONITOR_AVAILABLE:
+                init_monitor(
+                    perplexity_limit=token_limit_search,
+                    qwen_limit=token_limit_embedding,
+                    cost_limit=1.0
+                )
+                start_monitoring()
+                print(f"🔍 Token监控已启动")
+            
+            search_results = []
+            
+            try:
+                # 第1步：搜索
+                print(f"\n📡 第1步：执行搜索 (模型: {search_model})")
+                
+                for topic in search_topics:
+                    topic = topic.strip()
+                    print(f"🔍 搜索主题: {topic}")
+                    
+                    try:
+                        # 构建搜索查询
+                        search_query = f"最新的{topic}研究和发展趋势"
+                        if time_filter:
+                            search_query += f" 时间范围:{time_filter}"
+                        
+                        # 使用统一搜索接口
+                        result = await call_search(
+                            search_query,
+                            model_alias=search_model,
+                            search_recency_filter=time_filter
+                        )
+                        
+                        # 解析搜索结果
+                        if result.get("choices"):
+                            content = result["choices"][0]["message"]["content"]
+                            search_results.append({
+                                "topic": topic,
+                                "content": content,
+                                "model": search_model
+                            })
+                            print(f"✅ {topic} 搜索完成")
+                        else:
+                            print(f"⚠️ {topic} 搜索无结果")
+                        
+                        # 记录Token使用
+                        if TOKEN_MONITOR_AVAILABLE and "usage" in result:
+                            usage = result["usage"]
+                            log_api_call(
+                                search_model, 
+                                "sonar-pro",
+                                usage.get("prompt_tokens", 0),
+                                usage.get("completion_tokens", 0)
+                            )
+                        
+                    except Exception as e:
+                        print(f"❌ {topic} 搜索失败: {e}")
+                        continue
+                
+                print(f"✅ 搜索完成，找到 {len(search_results)} 个结果")
+                
+                if not search_results:
+                    print("❌ 没有搜索结果，结束流程")
+                    return {"success": False, "error": "没有搜索结果"}
+                
+                # 第2步：智能筛选
+                print(f"\n🧠 第2步：智能筛选 (模型: {llm_model})")
+                
+                # 构建筛选提示
+                results_text = "\n".join([
+                    f"{i+1}. 主题: {r['topic']}\n内容: {r['content'][:500]}...\n"
+                    for i, r in enumerate(search_results)
+                ])
+                
+                results_count = len(search_results)
+                filter_prompt = f"Please select the {selection_count} most important and relevant results from the following {results_count} search results:\\n\\n"
+                filter_prompt += results_text
+                filter_prompt += "\\n\\nPlease return the numbers of the selected results (comma-separated), for example: 1,3,5\\n\\n"
+                filter_prompt += "Selection criteria:\\n"
+                filter_prompt += "1. Authority and credibility of the content\\n"
+                filter_prompt += "2. Timeliness and practicality of the information\\n"
+                filter_prompt += "3. Relevance to the field of credit research\\n"
+                filter_prompt += "Ensure output is in English."
+                
+                try:
+                    filter_result = await call_llm(filter_prompt, model_alias=llm_model)
+                    response_text = filter_result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    
+                    # Parse filtered results
+                    try:
+                        selected_indices = [int(x.strip()) - 1 for x in response_text.split(",") if x.strip().isdigit()]
+                        filtered_results = [search_results[i] for i in selected_indices if 0 <= i < len(search_results)]
+                        
+                        if not filtered_results:
+                            filtered_results = search_results[:selection_count]
+                            print(f"⚠️ Filter parsing failed, using top {selection_count} results")
+                        else:
+                            print(f"✅ Intelligent filtering complete, selected {len(filtered_results)} results")
+                        
+                    except:
+                        filtered_results = search_results[:selection_count]
+                        print(f"⚠️ Filter parsing failed, using top {selection_count} results")
+                    
+                    # Log token usage
+                    if TOKEN_MONITOR_AVAILABLE and "usage" in filter_result:
+                        usage = filter_result["usage"]
+                        log_api_call(
+                            llm_model,
+                            "qwen-turbo", 
+                            usage.get("prompt_tokens", 0),
+                            usage.get("completion_tokens", 0)
+                        )
+                        
+                except Exception as e:
+                    print(f"⚠️ Intelligent filtering failed: {e}")
+                    filtered_results = search_results[:selection_count]
+                
+                # 第3步：向量化和语义分析
+                print(f"\n🧮 第3步：向量化分析 (模型: {embedding_model})")
+                
+                texts_to_vectorize = [r["content"] for r in filtered_results]
+                
+                try:
+                    embedding_result = await call_embedding(texts_to_vectorize, model_alias=embedding_model)
+                    
+                    if embedding_result.get("success"):
+                        embeddings = embedding_result["embeddings"]
+                        print(f"✅ 向量化完成: {len(texts_to_vectorize)} 个文本 → {len(embeddings)} 个向量")
+                        
+                        # 记录Token使用
+                        if TOKEN_MONITOR_AVAILABLE:
+                            input_tokens = sum(len(text.split()) for text in texts_to_vectorize)
+                            log_api_call(embedding_model, "text-embedding-v2", input_tokens, 0)
+                        
+                        # 简单的相似性分析（这里可以扩展更复杂的分析）
+                        print("📊 向量维度:", len(embeddings[0]) if embeddings else 0)
+                        
+                    else:
+                        print("⚠️ 向量化失败，跳过语义分析")
+                        
+                except Exception as e:
+                    print(f"⚠️ 向量化失败: {e}")
+                
+                # 第4步：生成报告
+                print(f"\n📝 第4步：生成研究报告 (模型: {llm_model})")
+                
+                # 构建报告内容
+                report_content = f"""# Credit Research Dynamics Report
+
+**Generation Time**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+**Search Topics**: {', '.join(search_topics)}
+**Time Range**: {time_filter}
+
+## 📊 Executive Summary
+- Search Results: {len(search_results)} items
+- Filtered Results: {len(filtered_results)} items
+- Models Used: {llm_model} (filtering), {embedding_model} (vectorization), {search_model} (search)
+
+## 🔍 Detailed Results
+
+"""
+                
+                for i, result in enumerate(filtered_results, 1):
+                    report_content += f"""### {i}. {result['topic']}
+
+{result['content']}
+
+---
+
+"""
+                
+                # 使用LLM生成总结
+                try:
+                    summary_prompt = f"""Please generate a concise summary and trend analysis for the following credit research content:
+
+{report_content}
+
+Please provide:
+1. Key findings and trends
+2. Impact analysis on the industry
+3. Key areas to focus on
+Ensure output is in English.
+"""
+                    
+                    summary_result = await call_llm(summary_prompt, model_alias=llm_model)
+                    summary = summary_result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    
+                    if summary:
+                        report_content += f"""## 🎯 Intelligent Summary
+
+{summary}
+
+---
+*This report was automatically generated by Unified Model Manager*
+"""
+                        print("✅ Intelligent summary generation complete")
+                    
+                except Exception as e:
+                    print(f"⚠️ Intelligent summary generation failed: {e}")
+                
+                # 第5步：保存报告
+                print(f"\n📁 第5步：保存报告")
+                
+                # 创建报告目录
+                reports_dir = Path("reports")
+                reports_dir.mkdir(exist_ok=True)
+                
+                # 保存报告
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                report_file = reports_dir / f"unified_research_report_{timestamp}.md"
+                
+                with open(report_file, 'w', encoding='utf-8') as f:
+                    f.write(report_content)
+                
+                print(f"📁 报告已保存: {report_file}")
+                
+                # 第6步：发送邮件
+                print(f"\n📧 第6步：发送邮件通知")
+                
+                try:
+                    # 这里应该实现邮件发送逻辑
+                    # 目前只是模拟
+                    print(f"📤 模拟发送邮件到: {', '.join(email_recipients)}")
+                    print("✅ 邮件发送完成")
+                    
+                except Exception as e:
+                    print(f"⚠️ 邮件发送失败: {e}")
+                
+                # 停止Token监控
+                if TOKEN_MONITOR_AVAILABLE:
+                    stop_monitoring()
+                
+                return {
+                    "success": True,
+                    "timestamp": datetime.now().isoformat(),
+                    "search_results_count": len(search_results),
+                    "filtered_results_count": len(filtered_results),
+                    "report_file": str(report_file),
+                    "models_used": {
+                        "llm": llm_model,
+                        "embedding": embedding_model,
+                        "search": search_model
+                    }
+                }
+                
+            except Exception as e:
+                if TOKEN_MONITOR_AVAILABLE:
+                    stop_monitoring()
+                print(f"❌ 流程执行失败: {e}")
+                return {"success": False, "error": str(e)}
+        
+        # 执行主流程
+        print("🚀 启动统一研究自动化流程...")
+        result = await unified_research_flow()
+        
+        # 输出结果
+        print("\n" + "=" * 50)
+        if result["success"]:
+            print("🎉 研究流程成功完成!")
+            print("📊 执行摘要:")
+            for key, value in result.items():
+                if key != "success":
+                    print(f"  • {key}: {value}")
+        else:
+            print("❌ 研究流程失败:")
+            print(f"  错误: {result.get('error', '未知错误')}")
+            sys.exit(1)
+        
+        EOF
+    
+    - name: 📤 上传报告
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: research-reports
+        path: reports/
+        retention-days: 30
+    
+    - name: 📊 输出摘要
+      if: always()
+      run: |
+        echo "## 🎯 统一研究自动化摘要" >> $GITHUB_STEP_SUMMARY
+        echo "**执行时间**: $(date)" >> $GITHUB_STEP_SUMMARY
+        echo "**搜索主题**: ${{ github.event.inputs.search_topics }}" >> $GITHUB_STEP_SUMMARY
+        echo "**使用模型**: LLM(${{ github.event.inputs.llm_model }}), 向量化(${{ github.event.inputs.embedding_model }}), 搜索(${{ github.event.inputs.search_model }})" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -d "reports" ]; then
+          echo "**生成报告**: $(ls -la reports/ | wc -l) 个文件" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "✅ 使用统一模型管理器执行完成" >> $GITHUB_STEP_SUMMARY

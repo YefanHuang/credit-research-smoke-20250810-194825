@@ -1,0 +1,162 @@
+name: Self-Hosted API Research Automation
+
+on:
+  workflow_dispatch:
+    inputs:
+      search_topics:
+        description: 'Search Topics (comma-separated)'
+        required: true
+        default: 'credit risk management,ESG ratings'
+      filter_count:
+        description: 'Number of documents to filter'
+        required: false
+        default: '5'
+      email_recipients:
+        description: 'Email Recipients (comma-separated)'
+        required: true
+        default: 'admin@example.com'
+  # schedule:
+    # - cron: '0 2 1,8,15,22 * *'  # 4 times a month (Disabled)
+
+jobs:
+  deploy-and-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: research_db
+          POSTGRES_USER: research_user
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install API dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r api/requirements.txt
+
+      - name: Set up environment variables
+        run: |
+          cat > api/.env << EOF
+          APP_NAME="Credit Research API"
+          APP_VERSION="1.0.0"
+          HOST="0.0.0.0"
+          PORT=8000
+          
+          DATABASE_URL="postgresql://research_user:postgres@localhost:5432/research_db"
+          REDIS_URL="redis://localhost:6379"
+          
+          PERPLEXITY_API_KEY="${{ secrets.PERPLEXITY_API_KEY }}"
+          # DEEPSEEK_API_KEY="${{ secrets.DEEPSEEK_API_KEY }}"  # Commented out, focusing on Qwen API
+          QWEN_API_KEY="${{ secrets.QWEN_API_KEY }}"
+          
+          SMTP_SERVER="${{ secrets.SMTP_SERVER }}"
+          SMTP_PORT=587
+          SMTP_USER="${{ secrets.SMTP_USER }}"
+          SMTP_PASSWORD="${{ secrets.SMTP_PASSWORD }}"
+          DEFAULT_FROM_EMAIL="${{ secrets.DEFAULT_FROM_EMAIL }}"
+          
+          VECTOR_DB_TYPE="chromadb"
+          SECRET_KEY="${{ secrets.SECRET_KEY }}"
+          CELERY_BROKER_URL="redis://localhost:6379/0"
+          CELERY_RESULT_BACKEND="redis://localhost:6379/0"
+          
+          LOG_LEVEL="INFO"
+          EOF
+
+      - name: Start API service
+        run: |
+          cd api
+          python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+          API_PID=$!
+          echo "API_PID=$API_PID" >> $GITHUB_ENV
+          
+          # Wait for API to start
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/api/v1/ping > /dev/null; then
+              echo "✅ API service started successfully"
+              break
+            fi
+            echo "Waiting for API to start... ($i/30)"
+            sleep 2
+          done
+
+      - name: Install client dependencies
+        run: |
+          pip install -r client_requirements.txt
+
+      - name: Execute research via API
+        run: |
+          python -c "
+          import asyncio
+          import sys
+          import os
+          sys.path.append('oop')
+          from research_client import ResearchClient
+          
+          async def main():
+              client = ResearchClient(api_base_url='http://localhost:8000/api/v1')
+              
+              # Parse input parameters
+              topics = '${{ github.event.inputs.search_topics || \"credit risk management,ESG ratings\" }}'.split(',')
+              filter_count = int('${{ github.event.inputs.filter_count || \"5\" }}')
+              recipients = '${{ github.event.inputs.email_recipients || \"admin@example.com\" }}'.split(',')
+              
+              print(f'🔍 Search Topics: {topics}')
+              print(f'📊 Filter Count: {filter_count}')
+              print(f'📧 Recipients: {recipients}')
+              
+              try:
+                  # Health check
+                  health = await client.health_check()
+                  print(f'✅ API Health Status: {health[\"status\"]}')
+                  
+                  # Execute full research process
+                  result = await client.execute_research(
+                      search_topics=topics,
+                      email_recipients=recipients,
+                      filter_count=filter_count,
+                      time_filter='2024-01-01',
+                      async_mode=False  # Synchronous mode to ensure completion
+                  )
+                  
+                  print(f'🎉 Research task completed!')
+                  print(f'📋 Task ID: {result[\"task_id\"]}')
+                  print(f'📈 Status: {result[\"status\"]}')
+                  
+              except Exception as e:
+                  print(f'❌ Execution failed: {e}')
+                  sys.exit(1)
+          
+          asyncio.run(main())
+          "
+
+      - name: Cleanup
+        if: always()
+        run: |
+          if [ ! -z "$API_PID" ]; then
+            kill $API_PID || true
+          fi

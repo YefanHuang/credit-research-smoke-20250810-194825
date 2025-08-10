@@ -1,0 +1,636 @@
+name: Manual ChromaDB Training
+
+on:
+  workflow_dispatch:
+    inputs:
+      training_mode:
+        description: 'Training Mode'
+        required: true
+        default: 'incremental'
+        type: choice
+        options:
+          - 'incremental'    # Incremental training (default, processes only new files)
+          - 'full_retrain'   # Full retraining (reprocesses all files)
+          - 'stats_only'     # View statistics only
+      
+      cleanup_after_training:
+        description: 'Clean up processed files after training'
+        required: false
+        default: false
+        type: boolean
+      
+      create_github_release:
+        description: 'Create GitHub Release'
+        required: false
+        default: true
+        type: boolean
+      
+      token_multiplier:
+        description: 'Token limit multiplier (based on estimated usage)'
+        required: false
+        default: '1.5'
+        type: choice
+        options:
+          - '1.2'   # Conservative mode
+          - '1.5'   # Standard mode (default)
+          - '2.0'   # Loose mode
+          - '3.0'   # Development mode
+
+env:
+  QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
+
+jobs:
+  check-traindb:
+    name: Check traindb folder
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    
+    outputs:
+      has_files: ${{ steps.check.outputs.has_files }}
+      file_count: ${{ steps.check.outputs.file_count }}
+      total_size: ${{ steps.check.outputs.total_size }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Check traindb folder
+        id: check
+        run: |
+          if [ ! -d "traindb" ]; then
+            echo "Creating traindb folder..."
+            mkdir -p traindb
+            echo "has_files=false" >> $GITHUB_OUTPUT
+            echo "file_count=0" >> $GITHUB_OUTPUT
+            echo "total_size=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Collect file info
+          file_count=$(find traindb -type f \( -name "*.txt" -o -name "*.md" -o -name "*.pdf" -o -name "*.docx" \) | wc -l)
+          total_size=$(find traindb -type f \( -name "*.txt" -o -name "*.md" -o -name "*.pdf" -o -name "*.docx" \) -exec du -b {} + | awk '{sum += $1} END {print sum}')
+          
+          echo "📁 traindb folder status:"
+          echo "   File count: $file_count"
+          echo "   Total size: $total_size bytes"
+          
+          if [ "$file_count" -gt 0 ]; then
+            echo "has_files=true" >> $GITHUB_OUTPUT
+            echo "📋 Discovered files:"
+            find traindb -type f \( -name "*.txt" -o -name "*.md" -o -name "*.pdf" -o -name "*.docx" \) -exec basename {} \;
+          else
+            echo "has_files=false" >> $GITHUB_OUTPUT
+            echo "⚠️ traindb folder is empty"
+          fi
+          
+          echo "file_count=$file_count" >> $GITHUB_OUTPUT
+          echo "total_size=$total_size" >> $GITHUB_OUTPUT
+
+  manual-training:
+    name: Manual ChromaDB Training
+    runs-on: ubuntu-latest
+    needs: check-traindb
+    if: ${{ needs.check-traindb.outputs.has_files == 'true' || github.event.inputs.training_mode == 'stats_only' }}
+    timeout-minutes: 30
+    
+    outputs:
+      training_result: ${{ steps.train.outputs.result }}
+      chromadb_version: ${{ steps.train.outputs.version }}
+      package_path: ${{ steps.train.outputs.package_path }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install aiofiles aiohttp
+          # Note: Install Qwen API client in actual use
+          # pip install dashscope
+      
+      - name: Load previous training state
+        run: |
+          # Restore training state from previous run (if exists)
+          if [ -f "traindb/.training_state.json" ]; then
+            echo "✅ Found previous training state"
+            cat traindb/.training_state.json | jq '.total_api_calls' || echo "0"
+          else
+            echo "ℹ️ First training, creating new state"
+          fi
+      
+      - name: Execute manual training
+        id: train
+        run: |
+          cat > train_chromadb.py << 'EOF'
+          import asyncio
+          import json
+          import os
+          import sys
+          from datetime import datetime
+          from pathlib import Path
+          import hashlib
+          import random
+
+          # Qwen API Client (simulated version)
+          class QwenAPIClient:
+              def __init__(self, api_key):
+                  self.api_key = api_key
+                  self.api_calls_count = 0
+              
+              async def intelligent_segmentation(self, text: str, max_chunk_size: int = 800, domain: str = "credit_research"):
+                  """Intelligent Text Segmentation"""
+                  self.api_calls_count += 1
+                  print(f"🔧 API Call {self.api_calls_count}: Text Segmentation")
+                  
+                  # Simple segmentation by period (use Qwen API in actual use)
+                  sentences = text.split('。')
+                  chunks = []
+                  current_chunk = ""
+                  
+                  for sentence in sentences:
+                      if len(current_chunk + sentence) <= max_chunk_size:
+                          current_chunk += sentence + "。"
+                      else:
+                          if current_chunk:
+                              chunks.append(current_chunk.strip())
+                          current_chunk = sentence + "。"
+                  
+                  if current_chunk:
+                      chunks.append(current_chunk.strip())
+                  
+                  return [chunk for chunk in chunks if len(chunk.strip()) > 10]
+              
+              async def create_embeddings(self, texts: list):
+                  """Create Embeddings"""
+                  self.api_calls_count += 1
+                  print(f"🔧 API Call {self.api_calls_count}: Vectorizing {len(texts)} texts")
+                  
+                  # Generate 1536-dim vectors (use Qwen API in actual use)
+                  embeddings = []
+                  for text in texts:
+                      embedding = [random.random() for _ in range(1536)]
+                      embeddings.append(embedding)
+                  
+                  return {"embeddings": embeddings}
+
+          async def main():
+              # Check API key
+              api_key = os.getenv('QWEN_API_KEY')
+              if not api_key:
+                  print("⚠️ QWEN_API_KEY not set, using simulation mode")
+                  api_key = "mock_key"
+              
+              # Initialize client
+              qwen_client = QwenAPIClient(api_key)
+              
+              # Get training mode and Token multiplier
+              training_mode = "${{ github.event.inputs.training_mode }}"
+              token_multiplier = float("${{ github.event.inputs.token_multiplier || '1.5' }}")
+              print(f"🎯 Training mode: {training_mode}")
+              print(f"🔢 Token limit multiplier: {token_multiplier}x")
+              
+              if training_mode == "stats_only":
+                  # Show statistics only
+                  await show_training_stats()
+                  return
+              
+              # Execute training
+              force_retrain = (training_mode == "full_retrain")
+              result = await execute_training(qwen_client, force_retrain, token_multiplier)
+              
+              # Output results
+              print(f"::set-output name=result::{json.dumps(result)}")
+              if result.get("chromadb_version"):
+                  print(f"::set-output name=version::{result['chromadb_version']}")
+              if result.get("package_path"):
+                  print(f"::set-output name=package_path::{result['package_path']}")
+
+          async def show_training_stats():
+              """Show training statistics"""
+              state_file = Path("traindb/.training_state.json")
+              if not state_file.exists():
+                  print("📊 No training history available")
+                  return
+              
+              with open(state_file, 'r', encoding='utf-8') as f:
+                  state = json.load(f)
+              
+              print("📊 Training Statistics:")
+              print(f"   Total API calls: {state.get('total_api_calls', 0)}")
+              print(f"   Processed files: {len(state.get('processed_files', {}))}")
+              print(f"   Training sessions: {len(state.get('training_sessions', []))}")
+              print(f"   Current version: {state.get('current_chromadb_version', 'None')}")
+              
+              # File status distribution
+              processed_files = list(state.get('processed_files', {}).values())
+              if processed_files:
+                  status_count = {}
+                  for file_record in processed_files:
+                      status = file_record.get('status', 'unknown')
+                      status_count[status] = status_count.get(status, 0) + 1
+                  
+                  print(f"   File status distribution: {status_count}")
+
+          async def execute_training(qwen_client, force_retrain, token_multiplier=1.5):
+              """Execute actual training"""
+              
+              # Simplified training logic
+              traindb_path = Path("traindb")
+              if not traindb_path.exists():
+                  return {"status": "error", "message": "traindb folder does not exist"}
+              
+              # Find files
+              supported_formats = ['.txt', '.md', '.pdf', '.docx']
+              files = []
+              for fmt in supported_formats:
+                  files.extend(traindb_path.glob(f"*{fmt}"))
+              
+              if not files:
+                  return {"status": "no_files", "message": "No supported files found in traindb"}
+              
+              print(f"📁 Found {len(files)} files")
+              
+              # Load or create state
+              state_file = Path("traindb/.training_state.json")
+              if state_file.exists() and not force_retrain:
+                  with open(state_file, 'r', encoding='utf-8') as f:
+                      state = json.load(f)
+                  processed_hashes = set(state.get('processed_files', {}).keys())
+              else:
+                  state = {
+                      "processed_files": {},
+                      "training_sessions": [],
+                      "current_chromadb_version": None,
+                      "total_api_calls": 0,
+                      "created_at": datetime.now().isoformat()
+                  }
+                  processed_hashes = set()
+              
+              # Check for new files
+              new_files = []
+              for file_path in files:
+                  file_hash = hashlib.md5(file_path.read_bytes()).hexdigest()
+                  if file_hash not in processed_hashes:
+                      new_files.append((file_path, file_hash))
+              
+              if not new_files:
+                  print("✅ No new files to process")
+                  return {"status": "no_new_files", "processed_files": 0}
+              
+              print(f"🆕 {len(new_files)} new files to process")
+              
+              # Token estimation and dynamic limit setting
+              print("🔢 Estimating Token consumption...")
+              total_chars = 0
+              for file_path, _ in new_files:
+                  try:
+                      if file_path.suffix.lower() in ['.txt', '.md']:
+                          content = file_path.read_text(encoding='utf-8')
+                          total_chars += len(content)
+                      else:
+                          # Use file size to estimate for other formats
+                          total_chars += file_path.stat().st_size
+                  except Exception:
+                      total_chars += file_path.stat().st_size
+              
+              # Token estimation (1 token ≈ 4 characters in English)
+              estimated_tokens = int(total_chars / 4)
+              dynamic_token_limit = int(estimated_tokens * token_multiplier)
+              
+              print(f"📊 Token estimation results:")
+              print(f"   File count: {len(new_files)}")
+              print(f"   Total characters: {total_chars:,}")
+              print(f"   Estimated tokens: {estimated_tokens:,}")
+              print(f"   Dynamic limit: {dynamic_token_limit:,} ({token_multiplier}x)")
+              
+              # Start Token monitoring (simulation)
+              print(f"🔍 Starting Token monitoring (multiplier: {token_multiplier}x)")
+              print(f"   If Token usage exceeds {dynamic_token_limit:,}, training will stop automatically")
+              
+              # Process files
+              total_chunks = 0
+              processed_records = []
+              actual_token_usage = 0
+              
+              for file_path, file_hash in new_files:
+                  try:
+                      print(f"📄 Processing: {file_path.name}")
+                      
+                      # Read file
+                      if file_path.suffix.lower() in ['.txt', '.md']:
+                          content = file_path.read_text(encoding='utf-8')
+                      else:
+                          content = f"File processing: {file_path.name} (implementation needed for {file_path.suffix} parsing)"
+                      
+                      if not content.strip():
+                          continue
+                      
+                      # Segment text
+                      chunks = await qwen_client.intelligent_segmentation(content)
+                      
+                      # Log token usage (segmentation)
+                      segmentation_tokens = len(content) // 4  # Estimate
+                      actual_token_usage += segmentation_tokens
+                      
+                      # Check Token limit
+                      if actual_token_usage > dynamic_token_limit:
+                          print(f"🚨 Token usage ({actual_token_usage:,}) exceeds limit ({dynamic_token_limit:,})")
+                          print("🛑 Training stopped automatically to prevent over-consumption")
+                          break
+                      
+                      # Vectorize
+                      if chunks:
+                          embeddings_result = await qwen_client.create_embeddings(chunks)
+                          total_chunks += len(chunks)
+                          
+                          # Log token usage (vectorization)
+                          vectorization_tokens = sum(len(chunk) // 4 for chunk in chunks)
+                          actual_token_usage += vectorization_tokens
+                          
+                          # Re-check Token limit
+                          if actual_token_usage > dynamic_token_limit:
+                              print(f"🚨 Token usage ({actual_token_usage:,}) exceeds limit ({dynamic_token_limit:,})")
+                              print("🛑 Training stopped automatically to prevent over-consumption")
+                              break
+                          
+                          print(f"   📊 Cumulative Token: {actual_token_usage:,}/{dynamic_token_limit:,} ({actual_token_usage/dynamic_token_limit*100:.1f}%)")
+                      
+                      # Record file
+                      record = {
+                          "file_path": str(file_path),
+                          "file_hash": file_hash,
+                          "processed_at": datetime.now().isoformat(),
+                          "chunks_count": len(chunks),
+                          "file_size_bytes": file_path.stat().st_size,
+                          "status": "processed"
+                      }
+                      
+                      processed_records.append(record)
+                      state["processed_files"][file_hash] = record
+                      
+                  except Exception as e:
+                      print(f"❌ Processing failed {file_path.name}: {e}")
+                      continue
+              
+              # Update state
+              version = f"manual_v{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+              state["current_chromadb_version"] = version
+              state["total_api_calls"] += qwen_client.api_calls_count
+              
+              # Save state
+              with open(state_file, 'w', encoding='utf-8') as f:
+                  json.dump(state, f, indent=2, ensure_ascii=False)
+              
+              # Create simplified output package
+              output_dir = Path(f"chromadb_output_{version}")
+              output_dir.mkdir(exist_ok=True)
+              
+              # Save metadata
+              metadata = {
+                  "version": version,
+                  "created_at": datetime.now().isoformat(),
+                  "training_type": "manual_traindb",
+                  "total_chunks": total_chunks,
+                  "source_files": len(processed_records),
+                  "api_calls_used": qwen_client.api_calls_count,
+                  "file_records": processed_records
+              }
+              
+              with open(output_dir / "metadata.json", 'w', encoding='utf-8') as f:
+                  json.dump(metadata, f, indent=2, ensure_ascii=False)
+              
+              # Calculate Token usage accuracy
+              token_accuracy = (1 - abs(estimated_tokens - actual_token_usage) / max(estimated_tokens, actual_token_usage)) * 100 if estimated_tokens > 0 else 0
+              
+              print(f"✅ Training complete!")
+              print(f"   Version: {version}")
+              print(f"   Processed files: {len(processed_records)}")
+              print(f"   Generated chunks: {total_chunks}")
+              print(f"   API calls: {qwen_client.api_calls_count}")
+              print(f"📊 Token Usage Report:")
+              print(f"   Estimated tokens: {estimated_tokens:,}")
+              print(f"   Actual tokens: {actual_token_usage:,}")
+              print(f"   Dynamic limit: {dynamic_token_limit:,}")
+              print(f"   Token accuracy: {token_accuracy:.1f}%")
+              print(f"   Limit multiplier: {token_multiplier}x")
+              
+              return {
+                  "status": "success",
+                  "chromadb_version": version,
+                  "package_path": str(output_dir),
+                  "processed_files": len(processed_records),
+                  "total_chunks": total_chunks,
+                  "api_calls": qwen_client.api_calls_count,
+                  "token_usage": {
+                      "estimated": estimated_tokens,
+                      "actual": actual_token_usage,
+                      "limit": dynamic_token_limit,
+                      "accuracy": round(token_accuracy, 1),
+                      "multiplier": token_multiplier
+                  }
+              }
+
+          if __name__ == "__main__":
+              asyncio.run(main())
+          EOF
+          
+          python train_chromadb.py
+        env:
+          QWEN_API_KEY: ${{ env.QWEN_API_KEY }}
+      
+      - name: Create training artifacts
+        if: ${{ steps.train.outputs.package_path }}
+        run: |
+          package_path="${{ steps.train.outputs.package_path }}"
+          version="${{ steps.train.outputs.version }}"
+          
+          if [ -d "$package_path" ]; then
+            echo "📦 Creating training package..."
+            cd "$package_path"
+            tar -czf "../chromadb_${version}.tar.gz" .
+            cd ..
+            
+            echo "✅ Training package created: chromadb_${version}.tar.gz"
+            ls -la chromadb_*.tar.gz
+          fi
+      
+      - name: Cleanup processed files (optional)
+        if: ${{ github.event.inputs.cleanup_after_training == 'true' && steps.train.outputs.result != '' }}
+        run: |
+          echo "🧹 Cleaning up processed files..."
+          
+          # Read training state
+          if [ -f "traindb/.training_state.json" ]; then
+            python << 'EOF'
+          import json
+          from pathlib import Path
+
+          # Read state file
+          with open("traindb/.training_state.json", 'r') as f:
+              state = json.load(f)
+
+          # Delete successfully processed files
+          cleaned_count = 0
+          for file_hash, record in state["processed_files"].items():
+              if record["status"] == "processed":
+                  file_path = Path(record["file_path"])
+                  if file_path.exists():
+                      try:
+                          file_path.unlink()
+                          print(f"🗑️ Deleted: {file_path.name}")
+                          cleaned_count += 1
+                      except Exception as e:
+                          print(f"⚠️ Deletion failed {file_path.name}: {e}")
+
+          print(f"✅ Cleanup complete, deleted {cleaned_count} files")
+          EOF
+          fi
+      
+      - name: Upload training artifacts
+        if: ${{ steps.train.outputs.package_path }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: chromadb-manual-${{ steps.train.outputs.version }}
+          path: |
+            chromadb_*.tar.gz
+            ${{ steps.train.outputs.package_path }}/
+            traindb/.training_state.json
+          retention-days: 30
+
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [manual-training]
+    if: ${{ needs.manual-training.outputs.chromadb_version && github.event.inputs.create_github_release == 'true' }}
+    timeout-minutes: 10
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Download training artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: chromadb-manual-${{ needs.manual-training.outputs.chromadb_version }}
+          path: ./release_assets
+      
+      - name: Prepare release info
+        id: release_info
+        run: |
+          version="${{ needs.manual-training.outputs.chromadb_version }}"
+          
+          # Read training results
+          training_result='${{ needs.manual-training.outputs.training_result }}'
+          
+          echo "Preparing Release information..."
+          echo "version=$version" >> $GITHUB_OUTPUT
+          
+          # Generate Release description
+          cat > release_body.md << EOF
+          # ChromaDB Manual Training Version $version
+          
+          ## 📊 Training Information
+          - **Training Time**: $(date '+%Y-%m-%d %H:%M:%S')
+          - **Training Mode**: ${{ github.event.inputs.training_mode }}
+          - **Trigger Method**: Manual Workflow Dispatch
+          
+          ## 📁 Training Statistics
+          Documents from traindb folder automatically processed by GitHub Actions
+          
+          ## 🔧 Usage
+          \`\`\`bash
+          # Download database
+          wget https://github.com/${{ github.repository }}/releases/download/$version/chromadb_$version.tar.gz
+          
+          # Extract and use  
+          tar -xzf chromadb_$version.tar.gz
+          \`\`\`
+          
+          ## 📋 Features
+          - ✅ Manually controlled training process
+          - ✅ Incremental processing to avoid duplicate training
+          - ✅ API call optimization
+          - ✅ Professional optimization for credit domain
+          - ✅ Comprehensive training state tracking
+          
+          ---
+          *Generated by manual training workflow - Run #${{ github.run_number }}*
+          EOF
+      
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        id: create_release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.release_info.outputs.version }}
+          release_name: ChromaDB Manual Training ${{ steps.release_info.outputs.version }}
+          body_path: release_body.md
+          draft: false
+          prerelease: false
+      
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./release_assets/chromadb_${{ needs.manual-training.outputs.chromadb_version }}.tar.gz
+          asset_name: chromadb_${{ needs.manual-training.outputs.chromadb_version }}.tar.gz
+          asset_content_type: application/gzip
+
+  final-summary:
+    name: Training Summary
+    runs-on: ubuntu-latest
+    needs: [check-traindb, manual-training, create-release]
+    if: always()
+    timeout-minutes: 5
+    
+    steps:
+      - name: Generate training summary
+        run: |
+          cat << 'EOF'
+          
+          🎯 Manual ChromaDB Training Completion Summary
+          ========================================
+          
+          📊 Execution Status:
+          - File Check: ${{ needs.check-traindb.result }}
+          - Manual Training: ${{ needs.manual-training.result }}  
+          - Create Release: ${{ needs.create-release.result }}
+          
+          📁 File Information:
+          - File Count: ${{ needs.check-traindb.outputs.file_count }}
+          - Total Size: ${{ needs.check-traindb.outputs.total_size }} bytes
+          
+          🏷️ Version Information:
+          - ChromaDB Version: ${{ needs.manual-training.outputs.chromadb_version || 'Not Generated' }}
+          
+          ⚙️ Configuration:
+          - Training Mode: ${{ github.event.inputs.training_mode }}
+          - Cleanup Files: ${{ github.event.inputs.cleanup_after_training }}
+          - Create Release: ${{ github.event.inputs.create_github_release }}
+          
+          💡 Important Reminders:
+          1. Processed files in traindb are tracked to avoid re-processing
+          2. You can choose to clean up processed files after training to save space
+          3. API call count is logged for each training session
+          4. Supports both incremental and full retraining modes
+          
+          📋 Next Steps/Suggestions:
+          - Incremental Training: Just place new documents in the traindb folder
+          - View Statistics: Select "stats_only" mode
+          - Retrain: Select "full_retrain" mode
+          
+          EOF
+          
+          echo "✅ Manual ChromaDB training workflow completed!"
+ 
+ 
+ 

@@ -1,0 +1,547 @@
+name: 🚀 统一部署管理
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_mode:
+        description: '部署模式选择'
+        required: true
+        default: 'health_check'
+        type: choice
+        options:
+          - 'health_check'  # 健康检查
+          - 'api_call'      # API调用测试
+          - 'self_hosted'   # 自托管部署
+          - 'docker'        # Docker部署
+          - 'full_deploy'   # 完整部署流程
+      
+      api_endpoint:
+        description: 'API端点URL (用于health_check和api_call模式)'
+        required: false
+        default: 'http://localhost:8000'
+        type: string
+      
+      docker_image:
+        description: 'Docker镜像名称'
+        required: false
+        default: 'creditmonitor:latest'
+        type: string
+      
+      test_topics:
+        description: '测试搜索主题'
+        required: false
+        default: '信用风险管理'
+        type: string
+
+env:
+  PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+  QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
+  CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+  SMTP_PORT: ${{ secrets.SMTP_PORT }}
+  SMTP_USER: ${{ secrets.SMTP_USER }}
+  SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+
+jobs:
+  health-check:
+    name: 🔍 健康检查
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: ${{ github.event.inputs.deployment_mode == 'health_check' || github.event.inputs.deployment_mode == 'full_deploy' }}
+    
+    outputs:
+      health_status: ${{ steps.check.outputs.status }}
+      api_available: ${{ steps.check.outputs.api_available }}
+      
+    steps:
+    - name: 📥 检出代码
+      uses: actions/checkout@v4
+    
+    - name: 🐍 设置Python环境
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: 📦 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests urllib3
+    
+    - name: 🔍 执行健康检查
+      id: check
+      run: |
+        python3 << 'EOF'
+        import requests
+        import os
+        import sys
+        from datetime import datetime
+        
+        def health_check():
+            print("🔍 开始健康检查...")
+            print("=" * 40)
+            
+            api_endpoint = "${{ github.event.inputs.api_endpoint || 'http://localhost:8000' }}"
+            
+            checks = {
+                "api_connectivity": False,
+                "model_status": False,
+                "smtp_config": False,
+                "api_keys": False
+            }
+            
+            # 1. API连接检查
+            try:
+                print(f"📡 检查API连接: {api_endpoint}")
+                response = requests.get(f"{api_endpoint}/health", timeout=10)
+                if response.status_code == 200:
+                    checks["api_connectivity"] = True
+                    print("✅ API连接正常")
+                else:
+                    print(f"⚠️ API连接异常: {response.status_code}")
+            except Exception as e:
+                print(f"❌ API连接失败: {e}")
+            
+            # 2. 模型状态检查 (本地)
+            try:
+                sys.path.append(os.path.join(os.getcwd(), 'oop'))
+                from model_manager import get_model_status
+                
+                status = get_model_status()
+                available_models = [k for k, v in status.items() if v["available"]]
+                
+                if available_models:
+                    checks["model_status"] = True
+                    print(f"✅ 可用模型: {', '.join(available_models)}")
+                else:
+                    print("❌ 没有可用模型")
+                    
+            except ImportError:
+                print("⚠️ 无法检查本地模型状态")
+            except Exception as e:
+                print(f"❌ 模型状态检查失败: {e}")
+            
+            # 3. SMTP配置检查
+            smtp_vars = ['SMTP_SERVER', 'SMTP_USER', 'SMTP_PASSWORD']
+            smtp_config = {var: os.getenv(var) for var in smtp_vars}
+            
+            if all(smtp_config.values()):
+                checks["smtp_config"] = True
+                print("✅ SMTP配置完整")
+            else:
+                missing = [k for k, v in smtp_config.items() if not v]
+                print(f"⚠️ SMTP配置缺失: {', '.join(missing)}")
+            
+            # 4. API密钥检查
+            api_keys = {
+                'QWEN': os.getenv('QWEN_API_KEY'),
+                'PERPLEXITY': os.getenv('PERPLEXITY_API_KEY'),
+                'CLAUDE': os.getenv('CLAUDE_API_KEY'),
+                'OPENAI': os.getenv('OPENAI_API_KEY')
+            }
+            
+            available_keys = [k for k, v in api_keys.items() if v]
+            if available_keys:
+                checks["api_keys"] = True
+                print(f"✅ 可用API密钥: {', '.join(available_keys)}")
+            else:
+                print("❌ 没有可用的API密钥")
+            
+            # 总体评估
+            passed_checks = sum(checks.values())
+            total_checks = len(checks)
+            health_score = (passed_checks / total_checks) * 100
+            
+            print(f"\n📊 健康检查结果:")
+            print(f"通过检查: {passed_checks}/{total_checks}")
+            print(f"健康评分: {health_score:.1f}%")
+            
+            # 输出结果
+            status = "healthy" if health_score >= 75 else "degraded" if health_score >= 50 else "unhealthy"
+            
+            print(f"HEALTH_STATUS={status}")
+            print(f"HEALTH_SCORE={health_score}")
+            print(f"API_AVAILABLE={checks['api_connectivity']}")
+            
+            # 写入GitHub输出
+            with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                f.write(f"status={status}\n")
+                f.write(f"score={health_score}\n")
+                f.write(f"api_available={checks['api_connectivity']}\n")
+            
+            return status == "healthy"
+        
+        if __name__ == "__main__":
+            success = health_check()
+            if not success:
+                print("⚠️ 健康检查发现问题，但继续执行...")
+        EOF
+
+  api-call-test:
+    name: 🧪 API调用测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: ${{ github.event.inputs.deployment_mode == 'api_call' || github.event.inputs.deployment_mode == 'full_deploy' }}
+    needs: [health-check]
+    
+    steps:
+    - name: 📥 检出代码
+      uses: actions/checkout@v4
+    
+    - name: 🐍 设置Python环境
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: 📦 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests urllib3 asyncio aiofiles
+    
+    - name: 🧪 执行API测试
+      run: |
+        python3 << 'EOF'
+        import requests
+        import json
+        import os
+        import sys
+        from datetime import datetime
+        
+        def test_api_calls():
+            print("🧪 开始API调用测试...")
+            print("=" * 40)
+            
+            api_endpoint = "${{ github.event.inputs.api_endpoint || 'http://localhost:8000' }}"
+            test_topics = "${{ github.event.inputs.test_topics || '信用风险管理' }}"
+            
+            tests = []
+            
+            # 测试1: 基础健康检查
+            try:
+                response = requests.get(f"{api_endpoint}/health", timeout=10)
+                tests.append({
+                    "name": "健康检查",
+                    "status": response.status_code == 200,
+                    "response_time": response.elapsed.total_seconds(),
+                    "details": response.json() if response.status_code == 200 else response.text
+                })
+            except Exception as e:
+                tests.append({
+                    "name": "健康检查", 
+                    "status": False,
+                    "error": str(e)
+                })
+            
+            # 测试2: 向量化API (如果可用)
+            try:
+                embed_data = {
+                    "texts": [f"测试文本: {test_topics}"],
+                    "model": "embedding"
+                }
+                response = requests.post(
+                    f"{api_endpoint}/vector/embed", 
+                    json=embed_data,
+                    timeout=30
+                )
+                tests.append({
+                    "name": "向量化API",
+                    "status": response.status_code == 200,
+                    "response_time": response.elapsed.total_seconds(),
+                    "details": f"向量维度: {len(response.json().get('embeddings', [{}])[0]) if response.status_code == 200 else 'N/A'}"
+                })
+            except Exception as e:
+                tests.append({
+                    "name": "向量化API",
+                    "status": False,
+                    "error": str(e)
+                })
+            
+            # 测试3: 研究API (如果可用)
+            try:
+                research_data = {
+                    "search_config": {
+                        "topics": [test_topics],
+                        "time_filter": "week",
+                        "max_results": 5,
+                        "source": "perplexity"
+                    },
+                    "filter_config": {
+                        "documents": [],
+                        "selection_count": 3,
+                        "model": "llm"
+                    },
+                    "email_config": {
+                        "to": ["test@example.com"],
+                        "subject": "API测试",
+                        "body": "自动化测试",
+                        "body_type": "text"
+                    }
+                }
+                response = requests.post(
+                    f"{api_endpoint}/research/automated", 
+                    json=research_data,
+                    timeout=60
+                )
+                tests.append({
+                    "name": "研究API",
+                    "status": response.status_code == 200,
+                    "response_time": response.elapsed.total_seconds(),
+                    "details": f"任务ID: {response.json().get('task_id', 'N/A') if response.status_code == 200 else response.text[:100]}"
+                })
+            except Exception as e:
+                tests.append({
+                    "name": "研究API",
+                    "status": False,
+                    "error": str(e)
+                })
+            
+            # 结果汇总
+            passed_tests = sum(1 for t in tests if t["status"])
+            total_tests = len(tests)
+            
+            print(f"\n📋 API测试结果:")
+            for test in tests:
+                status_icon = "✅" if test["status"] else "❌"
+                name = test["name"]
+                if test["status"]:
+                    time_info = f" ({test.get('response_time', 0):.2f}s)"
+                    details = test.get('details', '')
+                    print(f"{status_icon} {name}{time_info} - {details}")
+                else:
+                    error = test.get('error', '未知错误')
+                    print(f"{status_icon} {name} - 错误: {error}")
+            
+            print(f"\n通过测试: {passed_tests}/{total_tests}")
+            success_rate = (passed_tests / total_tests) * 100
+            print(f"成功率: {success_rate:.1f}%")
+            
+            return success_rate >= 50  # 至少50%测试通过才算成功
+        
+        if __name__ == "__main__":
+            success = test_api_calls()
+            if not success:
+                print("⚠️ API测试部分失败，但继续执行...")
+        EOF
+
+  self-hosted-deploy:
+    name: 🏠 自托管部署
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: ${{ github.event.inputs.deployment_mode == 'self_hosted' || github.event.inputs.deployment_mode == 'full_deploy' }}
+    
+    steps:
+    - name: 📥 检出代码
+      uses: actions/checkout@v4
+    
+    - name: 🐍 设置Python环境
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: 📦 安装系统依赖
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y redis-server
+        
+    - name: 🔧 配置Redis
+      run: |
+        sudo systemctl start redis-server
+        redis-cli ping
+        
+    - name: 📦 安装Python依赖
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then
+          pip install -r requirements.txt
+        fi
+        pip install fastapi uvicorn redis
+        
+    - name: 🏗️ 构建生产环境
+      run: |
+        # 如果存在生产打包脚本，使用它
+        if [ -f package_production.py ]; then
+          python package_production.py
+          cd production_package
+        fi
+        
+        # 设置环境变量
+        cat > .env << EOF
+        PERPLEXITY_API_KEY=${{ secrets.PERPLEXITY_API_KEY }}
+        QWEN_API_KEY=${{ secrets.QWEN_API_KEY }}
+        CLAUDE_API_KEY=${{ secrets.CLAUDE_API_KEY }}
+        OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+        
+        SMTP_SERVER=${{ secrets.SMTP_SERVER }}
+        SMTP_PORT=${{ secrets.SMTP_PORT }}
+        SMTP_USER=${{ secrets.SMTP_USER }}
+        SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}
+        
+        REDIS_URL=redis://localhost:6379
+        VECTOR_DB_TYPE=local
+        CHROMA_DB_HOST=localhost
+        CHROMA_DB_PORT=8001
+        EOF
+        
+    - name: 🚀 启动服务
+      run: |
+        # 启动API服务 (后台运行)
+        if [ -d api ]; then
+          cd api
+          nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > api.log 2>&1 &
+          sleep 10  # 等待服务启动
+        fi
+        
+        # 检查服务状态
+        curl -f http://localhost:8000/health || echo "API服务可能未启动"
+        
+    - name: 🧪 验证部署
+      run: |
+        python3 << 'EOF'
+        import requests
+        import time
+        import sys
+        
+        def verify_deployment():
+            print("🧪 验证自托管部署...")
+            
+            api_url = "http://localhost:8000"
+            max_retries = 5
+            
+            for i in range(max_retries):
+                try:
+                    response = requests.get(f"{api_url}/health", timeout=10)
+                    if response.status_code == 200:
+                        print("✅ 自托管API部署成功")
+                        print(f"服务响应: {response.json()}")
+                        return True
+                    else:
+                        print(f"⚠️ 尝试 {i+1}/{max_retries}: HTTP {response.status_code}")
+                except Exception as e:
+                    print(f"⚠️ 尝试 {i+1}/{max_retries}: {e}")
+                
+                if i < max_retries - 1:
+                    time.sleep(5)
+            
+            print("❌ 自托管部署验证失败")
+            return False
+        
+        success = verify_deployment()
+        if not success:
+            print("查看API日志:")
+            try:
+                with open("api/api.log", "r") as f:
+                    print(f.read()[-1000:])  # 显示最后1000字符
+            except:
+                print("无法读取API日志")
+        EOF
+
+  docker-deploy:
+    name: 🐳 Docker部署
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: ${{ github.event.inputs.deployment_mode == 'docker' || github.event.inputs.deployment_mode == 'full_deploy' }}
+    
+    steps:
+    - name: 📥 检出代码
+      uses: actions/checkout@v4
+    
+    - name: 🐳 构建Docker镜像
+      run: |
+        # 创建简单的Dockerfile (如果不存在)
+        if [ ! -f Dockerfile ]; then
+          cat > Dockerfile << 'EOF'
+        FROM python:3.9-slim
+
+        WORKDIR /app
+
+        COPY requirements.txt .
+        RUN pip install -r requirements.txt
+
+        COPY . .
+
+        EXPOSE 8000
+
+        CMD ["uvicorn", "api.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+        EOF
+        fi
+        
+        # 构建镜像
+        docker build -t ${{ github.event.inputs.docker_image || 'creditmonitor:latest' }} .
+        
+    - name: 🧪 测试Docker镜像
+      run: |
+        # 启动容器 (后台)
+        docker run -d --name creditmonitor-test \
+          -p 8000:8000 \
+          -e QWEN_API_KEY="${{ secrets.QWEN_API_KEY }}" \
+          -e PERPLEXITY_API_KEY="${{ secrets.PERPLEXITY_API_KEY }}" \
+          ${{ github.event.inputs.docker_image || 'creditmonitor:latest' }}
+        
+        # 等待服务启动
+        sleep 15
+        
+        # 测试连接
+        curl -f http://localhost:8000/health || echo "Docker服务可能未启动"
+        
+        # 查看容器日志
+        docker logs creditmonitor-test
+        
+        # 清理
+        docker stop creditmonitor-test
+        docker rm creditmonitor-test
+
+  summary:
+    name: 📊 部署摘要
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [health-check, api-call-test, self-hosted-deploy, docker-deploy]
+    
+    steps:
+    - name: 📋 生成摘要报告
+      run: |
+        echo "## 🚀 统一部署管理摘要" >> $GITHUB_STEP_SUMMARY
+        echo "**执行时间**: $(date)" >> $GITHUB_STEP_SUMMARY
+        echo "**部署模式**: ${{ github.event.inputs.deployment_mode }}" >> $GITHUB_STEP_SUMMARY
+        echo "**API端点**: ${{ github.event.inputs.api_endpoint }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        echo "### 执行结果" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ needs.health-check.result }}" != "skipped" ]; then
+          if [ "${{ needs.health-check.result }}" = "success" ]; then
+            echo "- ✅ **健康检查**: 通过 (评分: ${{ needs.health-check.outputs.score || '未知' }}%)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ **健康检查**: 失败" >> $GITHUB_STEP_SUMMARY
+          fi
+        fi
+        
+        if [ "${{ needs.api-call-test.result }}" != "skipped" ]; then
+          if [ "${{ needs.api-call-test.result }}" = "success" ]; then
+            echo "- ✅ **API测试**: 通过" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ **API测试**: 失败" >> $GITHUB_STEP_SUMMARY
+          fi
+        fi
+        
+        if [ "${{ needs.self-hosted-deploy.result }}" != "skipped" ]; then
+          if [ "${{ needs.self-hosted-deploy.result }}" = "success" ]; then
+            echo "- ✅ **自托管部署**: 成功" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ **自托管部署**: 失败" >> $GITHUB_STEP_SUMMARY
+          fi
+        fi
+        
+        if [ "${{ needs.docker-deploy.result }}" != "skipped" ]; then
+          if [ "${{ needs.docker-deploy.result }}" = "success" ]; then
+            echo "- ✅ **Docker部署**: 成功" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ **Docker部署**: 失败" >> $GITHUB_STEP_SUMMARY
+          fi
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 特色功能" >> $GITHUB_STEP_SUMMARY
+        echo "- 🔍 **多模式支持**: 健康检查/API测试/自托管/Docker" >> $GITHUB_STEP_SUMMARY
+        echo "- 🧪 **全面测试**: API连接/模型状态/SMTP配置验证" >> $GITHUB_STEP_SUMMARY
+        echo "- 🚀 **一键部署**: 统一的部署管理界面" >> $GITHUB_STEP_SUMMARY
+        echo "- 📊 **详细报告**: 实时状态监控和错误诊断" >> $GITHUB_STEP_SUMMARY

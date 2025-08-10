@@ -1,0 +1,128 @@
+name: Credit Research API Automation
+
+on:
+  workflow_dispatch:
+    inputs:
+      search_topics:
+        description: 'Search Topics (comma-separated)'
+        required: true
+        default: 'credit risk management,ESG ratings'
+      filter_count:
+        description: 'Number of documents to filter'
+        required: false
+        default: '5'
+      email_recipients:
+        description: 'Email Recipients (comma-separated)'
+        required: true
+        default: 'admin@example.com'
+  # schedule:
+    # - cron: '0 2 1,8,15,22 * *'  # 4 times a month (10 AM Beijing Time) (Disabled)
+
+env:
+  API_BASE_URL: ${{ secrets.API_BASE_URL || 'https://your-api-domain.com/api/v1' }}
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15  # Significantly reduce runtime
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      # 🎯 Key improvement: Install only lightweight client dependencies!
+      - name: Install client dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r client_requirements.txt
+
+      # 🚀 Use API client to execute research tasks
+      - name: Execute research via API
+        run: |
+          python -c "
+          import asyncio
+          import sys
+          import os
+          sys.path.append('oop')
+          from research_client import ResearchClient
+          
+          async def main():
+              client = ResearchClient(api_base_url='${{ env.API_BASE_URL }}')
+              
+              # Parse input parameters
+              topics = '${{ github.event.inputs.search_topics || \"credit risk management,ESG ratings\" }}'.split(',')
+              filter_count = int('${{ github.event.inputs.filter_count || \"5\" }}')
+              recipients = '${{ github.event.inputs.email_recipients || \"admin@example.com\" }}'.split(',')
+              
+              print(f'🔍 Search Topics: {topics}')
+              print(f'📊 Filter Count: {filter_count}')
+              print(f'📧 Recipients: {recipients}')
+              
+              try:
+                  # Health check
+                  health = await client.health_check()
+                  print(f'✅ API Health Status: {health[\"status\"]}')
+                  
+                  # Execute full research process
+                  result = await client.execute_research(
+                      search_topics=topics,
+                      filter_count=filter_count,
+                      email_recipients=recipients,
+                      time_filter='2024-01-01'  # Fixed time filter
+                  )
+                  
+                  print(f'🎉 Task submitted successfully!')
+                  print(f'📋 Task ID: {result[\"task_id\"]}')
+                  print(f'📈 Status: {result[\"status\"]}')
+                  
+                  # If synchronous mode, wait for completion
+                  if not result.get('async_mode', True):
+                      print('⏳ Waiting for task to complete...')
+                      # Add polling logic here
+                  
+              except Exception as e:
+                  print(f'❌ Execution failed: {e}')
+                  sys.exit(1)
+          
+          asyncio.run(main())
+          "
+        env:
+          # These are no longer needed, API service will handle them
+          # PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+          # DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          # EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          # Now only API access is needed
+          API_KEY: ${{ secrets.RESEARCH_API_KEY }}  # Optional: if API requires authentication
+
+      # 📊 Fallback: Direct HTTP call (no Python client needed)
+      - name: Fallback - Direct HTTP call
+        if: failure()
+        run: |
+          curl -X POST "${{ env.API_BASE_URL }}/research/execute" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.RESEARCH_API_KEY }}" \
+            -d '{
+              "search_config": {
+                "topics": ["credit risk management", "ESG ratings"],
+                "time_filter": "2024-01-01",
+                "max_results": 50,
+                "source": "perplexity"
+              },
+              "filter_config": {
+                "documents": [],
+                "selection_count": 5,
+                "model": "llm"
+              },
+              "email_config": {
+                "to": ["admin@example.com"],
+                "subject": "GitHub Actions Research Report",
+                "body": "Automated research results",
+                "body_type": "html"
+              },
+              "async_mode": true
+            }' || echo "API call failed, please check service status"

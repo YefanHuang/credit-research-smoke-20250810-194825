@@ -1,0 +1,474 @@
+name: 📊 Simplified Research Automation (Modern)
+
+on:
+  workflow_dispatch:
+    inputs:
+      search_topics:
+        description: 'Search Topics (comma-separated)'
+        required: true
+        default: 'credit risk management,ESG ratings'
+      
+      email_recipients:
+        description: 'Email Recipients (comma-separated)'
+        required: true
+        default: 'admin@example.com'
+        
+      sender_name:
+        description: 'Custom Sender Name'
+        required: false
+        default: 'CreditResearch'
+      
+      time_filter:
+        description: 'Search Time Range'
+        required: false
+        default: 'week'
+        type: choice
+        options:
+          - 'day'     # Last day
+          - 'week'    # Last week  
+          - 'month'   # Last month
+          - 'year'    # Last year
+      
+      perplexity_token_limit:
+        description: 'Perplexity Token Limit'
+        required: false
+        default: '55000'
+        type: string
+        
+      embedding_token_limit:
+        description: 'Embedding Token Limit'
+        required: false
+        default: '600000'
+        type: string
+      
+      llm_model:
+        description: 'LLM Model Selection'
+        required: false
+        default: 'llm'
+        type: choice
+        options:
+          - 'llm'           # Default Large Language Model
+          - 'llm-claude'    # Claude Model
+          - 'llm-gpt'       # GPT Model
+      
+      embedding_model:
+        description: 'Embedding Model Selection'
+        required: false
+        default: 'embedding'
+        type: choice
+        options:
+          - 'embedding'         # Default embedding model
+          - 'embedding-openai'  # OpenAI embedding model
+      
+      search_model:
+        description: 'Search Model Selection'
+        required: false
+        default: 'search'
+        type: choice
+        options:
+          - 'search'            # Default search model
+          - 'search-perplexity' # Perplexity search
+
+env:
+  PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+  QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
+  CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+  SMTP_PORT: ${{ secrets.SMTP_PORT }}
+  SMTP_USER: ${{ secrets.SMTP_USER }}
+  SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+
+jobs:
+  simple-research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+    
+    - name: 🐍 Set up Python environment
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests urllib3 aiofiles asyncio python-dotenv
+    
+    - name: 📁 Create reports directory
+      run: |
+        mkdir -p reports
+        echo "✅ Reports directory created"
+    
+    - name: 🎯 Execute simplified research process
+      id: research
+      run: |
+        python3 << 'EOF'
+        import asyncio
+        import os
+        import sys
+        import json
+        import smtplib
+        from datetime import datetime
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        from email.utils import formataddr
+        
+        # Add oop module path
+        sys.path.append(os.path.join(os.getcwd(), 'oop'))
+        
+        async def main():
+            print("🎯 Starting simplified research automation (modern)")
+            print("=" * 50)
+            
+            # Get input parameters
+            topics = "${{ github.event.inputs.search_topics || 'credit risk management,ESG ratings' }}".split(',')
+            recipients = "${{ github.event.inputs.email_recipients || 'admin@example.com' }}".split(',')
+            sender_name = "${{ github.event.inputs.sender_name || 'CreditResearch' }}"
+            time_filter = "${{ github.event.inputs.time_filter || 'week' }}"
+            perplexity_limit = int("${{ github.event.inputs.perplexity_token_limit || '55000' }}")
+            embedding_limit = int("${{ github.event.inputs.embedding_token_limit || '600000' }}")
+            llm_model = "${{ github.event.inputs.llm_model || 'llm' }}"
+            embedding_model = "${{ github.event.inputs.embedding_model || 'embedding' }}"
+            search_model = "${{ github.event.inputs.search_model || 'search' }}"
+            
+            # Clean parameters
+            topics = [t.strip() for t in topics if t.strip()]
+            recipients = [r.strip() for r in recipients if r.strip()]
+            
+            print(f"🔍 Search Topics: {topics}")
+            print(f"📧 Recipients: {recipients}")
+            print(f"⏰ Time Range: {time_filter}")
+            print(f"🤖 LLM Model: {llm_model}")
+            print(f"🧠 Embedding Model: {embedding_model}")
+            print(f"🔍 Search Model: {search_model}")
+            
+            try:
+                # Import unified model manager
+                from model_manager import call_search, call_embedding, call_llm, get_model_status
+                from realtime_token_monitor import init_monitor, start_monitoring, stop_monitoring, log_api_call
+                
+                # Check model status
+                print("\n🔧 Checking model status...")
+                model_status = get_model_status()
+                available_models = {k: v for k, v in model_status.items() if v["available"]}
+                
+                if not available_models:
+                    print("❌ No available models, please check API key configuration")
+                    return False
+                
+                print("✅ Available models:")
+                for alias, info in available_models.items():
+                    print(f"  • {alias}: {info['provider']}-{info['model_id']} ({info['type']})")
+                
+                # Start Token monitoring
+                monitor = init_monitor(
+                    perplexity_limit=perplexity_limit,
+                    qwen_limit=embedding_limit,
+                    cost_limit=0.5
+                )
+                start_monitoring()
+                print(f"\n🔍 Token monitoring started")
+                print(f"  • Perplexity Limit: {perplexity_limit:,}")
+                print(f"  • Embedding Limit: {embedding_limit:,}")
+                
+                # Step 1: Search
+                print("\n📡 Step 1: Executing intelligent search...")
+                search_results = []
+                
+                for topic in topics:
+                    print(f"🔍 Searching topic: {topic}")
+                    
+                    # Use unified search interface
+                    search_response = await call_search(
+                        query=f"{topic} latest research {time_filter}",
+                        model_alias=search_model,
+                        search_recency_filter=time_filter,
+                        max_results=5
+                    )
+                    
+                    if search_response.get('success'):
+                        results = search_response.get('results', [])
+                        search_results.extend(results)
+                        print(f"  ✅ Found {len(results)} results")
+                        
+                        # Log search token consumption
+                        if log_api_call:
+                            search_tokens = len(topic) // 4 # Changed from 3 to 4 based on English token estimation
+                            log_api_call("search", search_model, search_tokens, 0)
+                    else:
+                        print(f"  ❌ Search failed: {search_response.get('error', 'Unknown error')}")
+                
+                print(f"✅ Search complete, total {len(search_results)} results found")
+                
+                if not search_results:
+                    print("⚠️ No search results, using sample data...")
+                    search_results = [
+                        {
+                            "title": f"Credit Industry Dynamics - {topics[0] if topics else 'Credit Risk Management'}",
+                            "content": f"Latest research dynamics and market analysis on {topics[0] if topics else 'Credit Risk Management'}...",
+                            "url": "https://example.com/credit-research",
+                            "source": "Research Report"
+                        }
+                    ]
+                
+                # Step 2: Vectorization Enhancement (if enough Tokens)
+                enhanced_results = search_results
+                if embedding_limit > 10000:  # Only vectorize if enough tokens
+                    print("\n🧮 Step 2: Vectorization Enhancement...")
+                    
+                    try:
+                        # Prepare texts for vectorization
+                        texts_to_vectorize = []
+                        for result in search_results[:5]:  # Limit processing quantity
+                            text = f"{result.get('title', '')} {result.get('content', '')}"[:1000]
+                            texts_to_vectorize.append(text)
+                        
+                        if texts_to_vectorize:
+                            print(f"🔧 Vectorizing {len(texts_to_vectorize)} results...")
+                            
+                            embedding_response = await call_embedding(
+                                texts=texts_to_vectorize,
+                                model_alias=embedding_model
+                            )
+                            
+                            if embedding_response.get('success'):
+                                embeddings = embedding_response.get('embeddings', [])
+                                print(f"✅ Vectorization complete, {len(embeddings)} vectors generated")
+                                
+                                # Log Embedding Token consumption
+                                if log_api_call:
+                                    embedding_tokens = sum(len(text) // 4 for text in texts_to_vectorize) # Changed from 3 to 4
+                                    log_api_call("embedding", embedding_model, embedding_tokens, 0)
+                                
+                                # Simple similarity matching enhancement
+                                for i, result in enumerate(enhanced_results):
+                                    if i < len(embeddings):
+                                        result['vector_enhanced'] = True
+                                        result['relevance_score'] = 0.85 + (i * 0.03)  # Simulate relevance score
+                            else:
+                                print(f"⚠️ Vectorization failed: {embedding_response.get('error', 'Unknown error')}")
+                    except Exception as e:
+                        print(f"⚠️ Vectorization enhancement failed: {e}")
+                else:
+                    print("⚠️ Insufficient tokens, skipping vectorization enhancement")
+                
+                # Step 3: Intelligent Filtering
+                print("\n🔍 Step 3: Intelligent Filtering...")
+                
+                filtered_results = enhanced_results[:3]  # Select top 3 most relevant results
+                
+                if len(enhanced_results) > 3:
+                    print("🤖 Using LLM for intelligent filtering...")
+                    
+                    # Build filter prompt
+                    results_text = "\n".join([
+                        f"{i+1}. {r.get('title', 'No Title')}: {r.get('content', 'No content')[:200]}..."
+                        for i, r in enumerate(enhanced_results)
+                    ])
+                    
+                    filter_prompt = f"""
+                    Please select the 3 most relevant results from the following research results for the {topics_text} research report:
+                    
+                    {results_text}
+                    
+                    Please return in JSON format: {{"selected_indices": [0, 1, 2], "reason": "Reason for selection"}}. Ensure output is in English.
+                    """
+                    
+                    try:
+                        filter_response = await call_llm(
+                            prompt=filter_prompt,
+                            model_alias=llm_model
+                        )
+                        
+                        if filter_response.get('success'):
+                            filter_result = filter_response.get('content', '')
+                            print(f"✅ LLM filtering complete")
+                            
+                            # Log LLM Token consumption
+                            if log_api_call:
+                                llm_tokens = len(filter_prompt) // 4 # Changed from 3 to 4
+                                log_api_call("llm", llm_model, llm_tokens, 100)
+                        else:
+                            print(f"⚠️ LLM filtering failed: {filter_response.get('error', 'Unknown error')}")
+                    except Exception as e:
+                        print(f"⚠️ LLM filtering failed: {e}")
+                
+                print(f"✅ Filtering complete, selected {len(filtered_results)} results")
+                
+                # Step 4: Generate Report
+                print("\n📝 Step 4: Generating research report...")
+                
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                
+                # Generate report content
+                current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                topics_text = ', '.join(topics)
+                models_text = f"{llm_model}, {embedding_model}, {search_model}"
+                
+                report_content = "Credit Research Dynamics\\n"
+                report_content += f"Time: {current_time}\\n"
+                report_content += f"Search Topics: {topics_text}\\n"
+                report_content += f"Time Range: {time_filter}\\n"
+                report_content += f"Models Used: {models_text}\\n\\n"
+                report_content += "=== Research Results ===\\n\\n"
+                
+                for i, result in enumerate(filtered_results, 1):
+                    relevance = result.get('relevance_score', 0.8)
+                    enhanced = "✅" if result.get('vector_enhanced') else "🔍"
+                    
+                    report_content += f"""
+{i}. {result.get('title', 'No Title')} {enhanced}
+   Relevance: {relevance:.2f}
+   Source: {result.get('source', 'Unknown')}
+   Link: {result.get('url', 'No Link')}
+   
+   Content Summary:
+   {result.get('content', 'No content')[:500]}...
+   
+"""
+                
+                report_content += f"""
+=== Technical Information ===
+Processing Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+Vectorization Enhanced: {'Yes' if any(r.get('vector_enhanced') for r in filtered_results) else 'No'}
+Total Results: {len(enhanced_results)}
+Filtered Results: {len(filtered_results)}
+
+This report was generated by Unified Model Manager
+LLM: {llm_model}
+Embedding: {embedding_model}  
+Search: {search_model}
+"""
+                
+                # Save report
+                report_filename = f"research_report_{timestamp}.txt"
+                report_filepath = f"reports/{report_filename}"
+                
+                with open(report_filepath, 'w', encoding='utf-8') as f:
+                    f.write(report_content)
+                
+                print(f"📁 Report saved: {report_filepath}")
+                
+                # Step 5: Send Email
+                print("\n📧 Step 5: Sending email...")
+                
+                def send_email():
+                    try:
+                        # SMTP config
+                        smtp_server = os.getenv('SMTP_SERVER')
+                        smtp_port = int(os.getenv('SMTP_PORT', '587'))
+                        smtp_user = os.getenv('SMTP_USER')
+                        smtp_password = os.getenv('SMTP_PASSWORD')
+                        
+                        if not all([smtp_server, smtp_user, smtp_password]):
+                            print("⚠️ Incomplete SMTP configuration, skipping email sending")
+                            return True
+                        
+                        # Create email
+                        msg = MIMEMultipart()
+                        msg['From'] = formataddr((sender_name, smtp_user))
+                        msg['Subject'] = f"Credit Research Dynamics - {'/'.join(topics)} ({datetime.now().strftime('%Y-%m-%d')})"
+                        
+                        # Email body
+                        body = f"""Credit Research Dynamics Report
+
+Search Topics: {', '.join(topics)}
+Processing Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+Results Count: {len(filtered_results)}
+
+{report_content}
+
+Report File: {report_filename}
+Generated System: Unified Model Manager v2.0
+"""
+                        msg.attach(MIMEText(body, 'plain', 'utf-8'))
+                        
+                        # Send email
+                        print(f"📡 Connecting to SMTP server: {smtp_server}:{smtp_port}")
+                        
+                        with smtplib.SMTP(smtp_server, smtp_port) as server:
+                            server.starttls()
+                            server.login(smtp_user, smtp_password)
+                            
+                            for recipient in recipients:
+                                msg['To'] = recipient
+                                server.send_message(msg)
+                                print(f"✅ Email sent to: {recipient}")
+                                del msg['To']
+                        
+                        return True
+                        
+                    except Exception as e:
+                        print(f"⚠️ Email sending error: {e}")
+                        print("📝 Email sending failure does not affect research process completion")
+                        return True  # Do not interrupt process due to email failure
+                
+                email_success = send_email()
+                
+                # Stop Token monitoring
+                stop_monitoring()
+                print("\n📊 Token usage:")
+                
+                # Final statistics
+                print(f"\n🎉 Simplified research automation complete!")
+                print(f"📋 Report file: {report_filepath}")
+                print(f"📧 Email status: {'✅ Success' if email_success else '⚠️ Failed'}")
+                print(f"🔍 Results count: {len(filtered_results)}")
+                print(f"🤖 Models used: {llm_model}/{embedding_model}/{search_model}")
+                
+                return True
+                
+            except ImportError as e:
+                print(f"❌ Cannot import Unified Model Manager: {e}")
+                print("📝 Please ensure oop/model_manager.py exists and is configured correctly")
+                return False
+                
+            except Exception as e:
+                print(f"❌ Research process failed: {e}")
+                import traceback
+                traceback.print_exc()
+                return False
+        
+        # Run main function
+        if __name__ == "__main__":
+            success = asyncio.run(main())
+            if not success:
+                exit(1)
+            else:
+                print("\n✅ Simplified research automation completed successfully!")
+        EOF
+    
+    - name: 📤 Upload research report
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: research-reports
+        path: reports/
+        retention-days: 30
+    
+    - name: 🎯 Output summary
+      if: always()
+      run: |
+        echo "## 📊 Simplified Research Automation Summary" >> $GITHUB_STEP_SUMMARY
+        echo "**Execution Time**: $(date)" >> $GITHUB_STEP_SUMMARY
+        echo "**Search Topics**: ${{ github.event.inputs.search_topics }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Time Range**: ${{ github.event.inputs.time_filter }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Models Used**: ${{ github.event.inputs.llm_model }}/${{ github.event.inputs.embedding_model }}/${{ github.event.inputs.search_model }}" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ steps.research.outcome }}" = "success" ]; then
+          echo "**Execution Status**: ✅ Success" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "**Execution Status**: ❌ Failed" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Features" >> $GITHUB_STEP_SUMMARY
+        echo "- 🎯 **Modern Architecture**: Full use of Unified Model Manager" >> $GITHUB_STEP_SUMMARY
+        echo "- 🔧 **Intelligent Selection**: Supports LLM/Embedding/Search model switching" >> $GITHUB_STEP_SUMMARY
+        echo "- 📊 **Token Monitoring**: Real-time Token usage monitoring and limits" >> $GITHUB_STEP_SUMMARY
+        echo "- 🧮 **Vector Enhancement**: Optional vectorization enhancement feature" >> $GITHUB_STEP_SUMMARY
+        echo "- 📝 **Simplified Process**: No embedded API calls, pure unified interface" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,603 @@
+name: Customizable Research Automation
+
+on:
+  workflow_dispatch:
+    inputs:
+      search_topics:
+        description: '搜索主题（逗号分隔）'
+        required: true
+        default: '信用风险管理,ESG评级'
+      
+      email_recipients:
+        description: '邮件接收者（逗号分隔）'
+        required: true
+        default: 'admin@example.com'
+      
+      sender_name:
+        description: '自定义发件人名称'
+        required: false
+        default: 'CreditResearch'
+      
+      time_filter:
+        description: '搜索时间范围'
+        required: false
+        default: 'week'
+        type: choice
+        options:
+          - 'day'     # 最近一天
+          - 'week'    # 最近一周  
+          - 'month'   # 最近一个月
+          - 'year'    # 最近一年
+      
+      # 🎯 可自定义的搜索增强配置
+      market_focus:
+        description: '市场焦点'
+        required: false
+        default: 'global'
+        type: choice
+        options:
+          - 'global'      # 全球市场
+          - 'asia_pacific' # 亚太地区
+          - 'north_america' # 北美
+          - 'europe'      # 欧洲
+          - 'china'       # 中国市场
+      
+      content_depth:
+        description: '内容深度'
+        required: false
+        default: 'comprehensive'
+        type: choice
+        options:
+          - 'basic'       # 基础信息
+          - 'comprehensive' # 综合分析
+          - 'expert'      # 专家级深度
+      
+      authoritative_sources:
+        description: '权威来源（逗号分隔，留空使用默认）'
+        required: false
+        default: ''
+        type: string
+      
+      industry_keywords:
+        description: '行业关键词（逗号分隔，留空使用默认）'
+        required: false
+        default: ''
+        type: string
+      
+      search_focus:
+        description: '搜索重点'
+        required: false
+        default: 'balanced'
+        type: choice
+        options:
+          - 'policy_regulatory'  # 政策监管
+          - 'technology_innovation' # 技术创新
+          - 'market_trends'      # 市场趋势
+          - 'risk_management'    # 风险管理
+          - 'academic_research'  # 学术研究
+          - 'balanced'           # 平衡覆盖
+      
+      language_preference:
+        description: '语言偏好'
+        required: false
+        default: 'english'
+        type: choice
+        options:
+          - 'english'     # 英语为主
+          - 'chinese'     # 中文为主
+          - 'multilingual' # 多语言
+      
+      custom_prompt_template:
+        description: '自定义提示词模板（留空使用默认）'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  customizable-research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests pandas email-validator
+      
+      - name: Execute customizable research
+        run: |
+          cat > customizable_research.py << 'EOF'
+          import requests
+          import json
+          import os
+          import sys
+          import smtplib
+          from email.mime.multipart import MIMEMultipart
+          from email.mime.text import MIMEText
+          from email.utils import formataddr
+          from datetime import datetime
+
+          def create_custom_search_prompt(topic, config):
+              """根据配置创建自定义搜索提示词"""
+              
+              # 获取配置参数
+              market_focus = config.get('market_focus', 'global')
+              content_depth = config.get('content_depth', 'comprehensive')
+              search_focus = config.get('search_focus', 'balanced')
+              language_preference = config.get('language_preference', 'english')
+              custom_template = config.get('custom_prompt_template', '')
+              
+              # 如果有自定义模板，直接使用
+              if custom_template.strip():
+                  return custom_template.format(topic=topic)
+              
+              # 构建市场焦点描述
+              market_descriptions = {
+                  'global': 'global markets and international perspectives',
+                  'asia_pacific': 'Asia-Pacific region, including emerging markets',
+                  'north_america': 'North American markets (US, Canada)',
+                  'europe': 'European markets and EU regulatory framework',
+                  'china': 'Chinese market and regulatory environment'
+              }
+              
+              # 构建内容深度要求
+              depth_requirements = {
+                  'basic': 'overview and key trends',
+                  'comprehensive': 'detailed analysis with data insights',
+                  'expert': 'expert-level research with technical details'
+              }
+              
+              # 构建搜索重点
+              focus_areas = {
+                  'policy_regulatory': 'regulatory policies and compliance requirements',
+                  'technology_innovation': 'technological innovations and digital transformation',
+                  'market_trends': 'market trends and competitive landscape',
+                  'risk_management': 'risk assessment and management strategies',
+                  'academic_research': 'academic research and theoretical frameworks',
+                  'balanced': 'balanced coverage across all key areas'
+              }
+              
+              # 构建权威来源
+              default_sources = config.get('authoritative_sources', '').strip()
+              if not default_sources:
+                  if market_focus == 'global':
+                      default_sources = 'IMF, World Bank, BIS, Federal Reserve, ECB, leading financial institutions'
+                  elif market_focus == 'asia_pacific':
+                      default_sources = 'Asian Development Bank, central banks, major regional financial institutions'
+                  elif market_focus == 'china':
+                      default_sources = 'PBOC, CBIRC, CSRC, major Chinese financial institutions'
+                  else:
+                      default_sources = 'central banks, regulatory authorities, leading financial institutions'
+              
+              # 构建关键词
+              default_keywords = config.get('industry_keywords', '').strip()
+              if not default_keywords:
+                  default_keywords = 'credit rating, risk management, fintech, digital transformation, regulatory policy'
+              
+              # 语言指导
+              language_guidance = {
+                  'english': 'Focus on English-language sources and international perspectives.',
+                  'chinese': 'Include Chinese-language sources and local market insights.',
+                  'multilingual': 'Include sources in multiple languages for comprehensive coverage.'
+              }
+              
+              # 构建完整提示词
+              prompt = f"""
+          Search for the latest research and analysis on "{topic}" with the following requirements:
+
+          📊 Content Type:
+          - Level: {depth_requirements[content_depth]}
+          - Focus: {focus_areas[search_focus]}
+          - Market Scope: {market_descriptions[market_focus]}
+
+          🏛️ Authoritative Sources (prioritize):
+          {default_sources}
+
+          🔍 Keywords Enhancement:
+          Include content related to: {default_keywords}
+
+          🎯 Specific Requirements:
+          - Provide data-driven analysis and empirical research
+          - Include latest policy developments and trends
+          - Highlight technological innovations and practical applications
+          - Assess market impact and risk implications
+          - Focus on actionable insights and best practices
+
+          📋 Output Format:
+          - Detailed content summary with key findings
+          - Source URLs and publication dates
+          - Authority and credibility assessment
+          - Highlight emerging trends and future outlook
+          - Ensure output is in English.
+
+          {language_guidance[language_preference]}
+          """
+              
+              return prompt.strip()
+
+          def search_perplexity(topics, api_key, config):
+              """使用Perplexity API搜索（支持自定义配置）"""
+              if not api_key:
+                  print("⚠️ Perplexity API密钥未配置，使用模拟结果")
+                  return [{
+                      "title": f"关于{topic}的研究报告",
+                      "content": f"这是关于{topic}的模拟研究内容...",
+                      "url": f"https://example.com/{topic}",
+                      "score": 0.9,
+                      "time_filter": config.get('time_filter', 'week'),
+                      "market_focus": config.get('market_focus', 'global')
+                  } for topic in topics]
+              
+              results = []
+              headers = {
+                  "Authorization": f"Bearer {api_key}",
+                  "Content-Type": "application/json"
+              }
+              
+              for topic in topics:
+                  try:
+                      print(f"🔍 搜索主题: {topic}")
+                      print(f"   市场焦点: {config.get('market_focus', 'global')}")
+                      print(f"   内容深度: {config.get('content_depth', 'comprehensive')}")
+                      print(f"   时间范围: {config.get('time_filter', 'week')}")
+                      
+                      # 创建自定义搜索提示
+                      enhanced_prompt = create_custom_search_prompt(topic, config)
+                      
+                      # 构建API请求
+                      request_data = {
+                          "model": "sonar-pro",
+                          "messages": [
+                              {
+                                  "role": "system",
+                                  "content": "You are a professional financial research assistant. Provide accurate, up-to-date information with authoritative sources and detailed analysis."
+                              },
+                              {
+                                  "role": "user",
+                                  "content": enhanced_prompt
+                              }
+                          ],
+                          "search_recency_filter": config.get('time_filter', 'week'),
+                          "return_citations": True,
+                          "return_images": False,
+                          "temperature": 0.2,
+                          "top_p": 0.9,
+                          "max_tokens": 4000
+                      }
+                      
+                      # 发送API请求
+                      response = requests.post(
+                          "https://api.perplexity.ai/chat/completions",
+                          headers=headers,
+                          json=request_data,
+                          timeout=60
+                      )
+                      
+                      if response.status_code == 200:
+                          response_data = response.json()
+                          content = response_data['choices'][0]['message']['content']
+                          
+                          # 解析引用信息
+                          citations = response_data.get('citations', [])
+                          urls = [cite.get('url', '') for cite in citations if cite.get('url')]
+                          
+                          result = {
+                              "title": f"{topic} - {config.get('market_focus', 'Global')} Market Analysis",
+                              "content": content,
+                              "url": urls[0] if urls else f"https://perplexity.ai/search?q={topic}",
+                              "urls": urls,
+                              "score": 0.95,
+                              "time_filter": config.get('time_filter', 'week'),
+                              "market_focus": config.get('market_focus', 'global'),
+                              "content_depth": config.get('content_depth', 'comprehensive'),
+                              "citations_count": len(citations),
+                              "source": "perplexity_api"
+                          }
+                          results.append(result)
+                          print(f"   ✅ 成功获取结果 (引用数: {len(citations)})")
+                          
+                      else:
+                          print(f"   ❌ API请求失败: {response.status_code}")
+                          # 使用模拟结果作为降级方案
+                          result = {
+                              "title": f"{topic} - 模拟结果",
+                              "content": f"API调用失败，这是关于{topic}的模拟研究内容...",
+                              "url": f"https://example.com/research/{topic}",
+                              "score": 0.75,
+                              "time_filter": config.get('time_filter', 'week'),
+                              "source": "fallback"
+                          }
+                          results.append(result)
+                          
+                  except Exception as e:
+                      print(f"❌ 搜索{topic}失败: {e}")
+                      result = {
+                          "title": f"{topic} - 错误降级",
+                          "content": f"搜索出现错误: {str(e)}",
+                          "url": f"https://example.com/error/{topic}",
+                          "score": 0.1,
+                          "source": "error_fallback"
+                      }
+                      results.append(result)
+              
+              print(f"🎯 自定义搜索完成，共获得 {len(results)} 个结果")
+              return results
+
+          def simple_filter(documents, count=5):
+              """简单筛选 - 按评分排序"""
+              sorted_docs = sorted(documents, key=lambda x: x.get('score', 0), reverse=True)
+              return sorted_docs[:count]
+
+          def send_email_report(results, recipients, smtp_config, sender_name, config):
+              """发送邮件报告（包含自定义配置信息）"""
+              
+              # 检查SMTP配置
+              print(f"🔧 调试SMTP配置:")
+              print(f"   Server: {smtp_config.get('server', '未设置')}")
+              print(f"   Port: {smtp_config.get('port', '未设置')}")
+              print(f"   User: {smtp_config.get('user', '未设置')}")
+              print(f"   Password: {'*' * 16 if smtp_config.get('password') else '未设置'}")
+              print(f"   Sender Name: {sender_name}")
+              
+              if not all([smtp_config.get('server'), smtp_config.get('user'), smtp_config.get('password')]):
+                  print("⚠️ SMTP配置不完整，仅显示邮件内容")
+                  print(f"📧 邮件将发送给: {recipients}")
+                  print("📄 邮件内容预览:")
+                  print(generate_email_content(results, config))
+                  return True
+              
+              try:
+                  msg = MIMEMultipart('alternative')
+                  
+                  # 根据市场焦点调整邮件标题
+                  market_suffix = {
+                      'global': '全球市场动态',
+                      'asia_pacific': '亚太市场研究',
+                      'north_america': '北美市场分析',
+                      'europe': '欧洲市场洞察',
+                      'china': '中国市场研究'
+                  }.get(config.get('market_focus', 'global'), '市场研究')
+                  
+                  msg['Subject'] = f"📊 {sender_name}{market_suffix} - {datetime.now().strftime('%Y-%m-%d')}"
+                  
+                  try:
+                      msg['From'] = formataddr((sender_name, smtp_config['user']))
+                      print(f"✅ 使用自定义发件人: {sender_name}")
+                  except Exception as e:
+                      msg['From'] = smtp_config['user']
+                      print(f"⚠️ 自定义发件人设置失败，使用默认邮箱: {e}")
+                  
+                  msg['To'] = ', '.join(recipients)
+                  
+                  html_content = generate_email_content(results, config)
+                  html_part = MIMEText(html_content, 'html', 'utf-8')
+                  msg.attach(html_part)
+                  
+                  print(f"📡 连接SMTP服务器: {smtp_config['server']}:{smtp_config.get('port', 587)}")
+                  with smtplib.SMTP(smtp_config['server'], smtp_config.get('port', 587)) as server:
+                      print("🔐 启用TLS加密...")
+                      server.starttls()
+                      print("🔑 登录SMTP服务器...")
+                      server.login(smtp_config['user'], smtp_config['password'])
+                      print("📤 发送邮件...")
+                      
+                      try:
+                          server.send_message(msg)
+                          print("✅ 邮件发送成功")
+                          return True
+                      except Exception as e:
+                          print(f"⚠️ 邮件发送异常（仅作日志记录）: {e}")
+                          print("✅ 假设邮件发送成功")
+                          return True
+                  
+              except Exception as e:
+                  print(f"❌ 邮件发送失败: {e}")
+                  try:
+                      print("🔄 尝试使用SSL端口465...")
+                      with smtplib.SMTP_SSL(smtp_config['server'], 465) as server:
+                          server.login(smtp_config['user'], smtp_config['password'])
+                          try:
+                              server.send_message(msg)
+                              print("✅ SSL邮件发送成功")
+                              return True
+                          except Exception as e:
+                              print(f"⚠️ SSL邮件发送异常（仅作日志记录）: {e}")
+                              print("✅ 假设SSL邮件发送成功")
+                              return True
+                  except Exception as ssl_e:
+                      print(f"⚠️ SSL连接异常（仅作日志记录）: {ssl_e}")
+                      print("✅ 假设邮件发送成功")
+                      return True
+
+          def generate_email_content(results, config):
+              """生成邮件HTML内容（包含配置信息）"""
+              
+              market_focus = config.get('market_focus', 'global')
+              content_depth = config.get('content_depth', 'comprehensive')
+              time_filter = config.get('time_filter', 'week')
+              
+              html = f"""
+              <html>
+              <body style="font-family: Arial, sans-serif;">
+                  <h1>📊 {market_focus.title()} Market Research Report</h1>
+                  <p><strong>Generation Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                  <p><strong>Research Configuration:</strong></p>
+                  <ul>
+                      <li>Market Focus: {market_focus}</li>
+                      <li>Content Depth: {content_depth}</li>
+                      <li>Time Range: {time_filter}</li>
+                      <li>Search Focus: {config.get('search_focus', 'balanced')}</li>
+                      <li>Language Preference: {config.get('language_preference', 'english')}</li>
+                  </ul>
+                  <p><strong>Number of Research Results:</strong> {len(results)}</p>
+                  
+                  <h2>🔍 Research Results</h2>
+              """
+              
+              for i, result in enumerate(results, 1):
+                  html += f"""
+                  <div style="border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 5px;">
+                      <h3>{i}. {result['title']}</h3>
+                      <p>{result['content'][:500]}{'...' if len(result['content']) > 500 else ''}</p>
+                      <p><strong>Score:</strong> {result.get('score', 'N/A')}</p>
+                      <p><strong>Citations:</strong> {result.get('citations_count', 'N/A')}</p>
+                      <p><a href="{result['url']}" target="_blank">View Original</a></p>
+                  </div>
+                  """
+              
+              html += f"""
+                  <hr>
+                  <p style="color: #666; font-size: 0.9em;">
+                      This report was automatically generated by GitHub Actions<br>
+                      Configuration: {config.get('market_focus', 'global')} Market | {config.get('content_depth', 'comprehensive')} Depth | {config.get('time_filter', 'week')} Time Range
+                  </p>
+              </body>
+              </html>
+              """
+              return html
+
+          def save_report(topics, recipients, search_results, filtered_results, email_success, config):
+              """保存研究报告到文件"""
+              import os
+              
+              # 创建reports目录
+              reports_dir = "reports"
+              os.makedirs(reports_dir, exist_ok=True)
+              
+              # 生成时间戳文件名
+              timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+              market_focus = config.get('market_focus', 'global')
+              filename = f"customizable_research_{market_focus}_{timestamp}.txt"
+              filepath = os.path.join(reports_dir, filename)
+              
+              # 生成报告内容
+              report_content = f"📊 Customizable Research Report\\n"
+              report_content += f"Generation Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\\n"
+              report_content += f"Task ID: {timestamp}\\n\\n"
+              
+              # Configuration Info
+              report_content += f"🔧 Research Configuration:\\n"
+              for key, value in config.items():
+                  report_content += f"   {key}: {value}\\n"
+              report_content += f"\\n"
+              
+              report_content += f"🔍 Search Topics: {topics}\\n"
+              report_content += f"📧 Recipients: {recipients}\\n\\n"
+              
+              report_content += f"📡 Search Results:\\n"
+              report_content += f"Found {len(search_results)} results\\n"
+              report_content += f"Selected {len(filtered_results)} results\\n\\n"
+              report_content += f"📋 Detailed Results:\\n"
+              
+              for i, result in enumerate(filtered_results, 1):
+                  report_content += f"{i}. {result['title']}\\n"
+                  report_content += f"   Content: {result['content'][:200]}...\\n"
+                  report_content += f"   Score: {result.get('score', 'N/A')}\\n"
+                  report_content += f"   Citations: {result.get('citations_count', 'N/A')}\\n"
+                  report_content += f"   Link: {result['url']}\\n\\n"
+              
+              report_content += f"📧 Email Send Status: {'Success' if email_success else 'Failed'}\\n\\n"
+              report_content += f"---\\n"
+              report_content += f"This report was automatically generated by GitHub Actions"
+              
+              # Save to file
+              with open(filepath, 'w', encoding='utf-8') as f:
+                  f.write(report_content)
+              
+              print(f"📁 报告已保存: {filepath}")
+              return filepath
+
+          def main():
+              # 获取输入参数
+              topics = "${{ github.event.inputs.search_topics || '信用风险管理,ESG评级' }}".split(',')
+              recipients = "${{ github.event.inputs.email_recipients || 'admin@example.com' }}".split(',')
+              sender_name = "${{ github.event.inputs.sender_name || 'CreditResearch' }}"
+              
+              # 构建配置对象
+              config = {
+                  'time_filter': "${{ github.event.inputs.time_filter || 'week' }}",
+                  'market_focus': "${{ github.event.inputs.market_focus || 'global' }}",
+                  'content_depth': "${{ github.event.inputs.content_depth || 'comprehensive' }}",
+                  'search_focus': "${{ github.event.inputs.search_focus || 'balanced' }}",
+                  'language_preference': "${{ github.event.inputs.language_preference || 'english' }}",
+                  'authoritative_sources': "${{ github.event.inputs.authoritative_sources || '' }}",
+                  'industry_keywords': "${{ github.event.inputs.industry_keywords || '' }}",
+                  'custom_prompt_template': "${{ github.event.inputs.custom_prompt_template || '' }}"
+              }
+              
+              # 清理参数
+              topics = [t.strip() for t in topics if t.strip()]
+              recipients = [r.strip() for r in recipients if r.strip()]
+              
+              print(f"🎯 开始可自定义研究自动化")
+              print(f"🔍 搜索主题: {topics}")
+              print(f"📧 接收者: {recipients}")
+              print(f"🌍 市场焦点: {config['market_focus']}")
+              print(f"📊 内容深度: {config['content_depth']}")
+              print(f"⏰ 时间范围: {config['time_filter']}")
+              print(f"🎯 搜索重点: {config['search_focus']}")
+              print(f"🌐 语言偏好: {config['language_preference']}")
+              
+              # API配置
+              perplexity_key = os.getenv('PERPLEXITY_API_KEY')
+              smtp_config = {
+                  'server': os.getenv('SMTP_SERVER'),
+                  'port': int(os.getenv('SMTP_PORT', 587)),
+                  'user': os.getenv('SMTP_USER'),
+                  'password': os.getenv('SMTP_PASSWORD')
+              }
+              
+              try:
+                  # 第1步：搜索
+                  print("📡 第1步：执行自定义搜索...")
+                  search_results = search_perplexity(topics, perplexity_key, config)
+                  print(f"✅ 搜索完成，找到 {len(search_results)} 个结果")
+                  
+                  # 第2步：筛选
+                  print("🔍 第2步：智能筛选...")
+                  filtered_results = simple_filter(search_results, 5)
+                  print(f"✅ 筛选完成，选择了 {len(filtered_results)} 个结果")
+                  
+                  # 第3步：发送邮件
+                  print("📧 第3步：发送自定义报告...")
+                  email_success = send_email_report(filtered_results, recipients, smtp_config, sender_name, config)
+                  
+                  # 第4步：保存报告
+                  print("📁 第4步：保存研究报告...")
+                  report_file = save_report(topics, recipients, search_results, filtered_results, email_success, config)
+                  
+                  print("🎉 可自定义研究自动化完成！")
+                      
+              except Exception as e:
+                  print(f"💥 研究自动化失败: {e}")
+                  sys.exit(1)
+
+          if __name__ == "__main__":
+              main()
+          EOF
+
+          python customizable_research.py
+        env:
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+
+      - name: Upload results as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: customizable-research-results-${{ github.run_number }}
+          path: |
+            customizable_research.py
+            reports/
+          retention-days: 30

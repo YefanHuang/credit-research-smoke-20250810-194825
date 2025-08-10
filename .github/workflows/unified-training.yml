@@ -1,0 +1,341 @@
+name: 🎯 Unified ChromaDB Training (New Architecture)
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_retrain:
+        description: 'Force retrain all files'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      
+      token_multiplier:
+        description: 'Token limit multiplier (multiplier of estimated value)'
+        required: false
+        default: '1.5'
+        type: string
+      
+      traindb_folder:
+        description: 'Training database folder path'
+        required: false
+        default: 'traindb'
+        type: string
+      
+      auto_approve:
+        description: 'Auto approve training (skip confirmation)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+env:
+  QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
+  CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+jobs:
+  unified-training:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    steps:
+    - name: 📥 检出代码
+      uses: actions/checkout@v4
+    
+    - name: 🐍 设置Python环境
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: 📦 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests urllib3 aiofiles asyncio python-dotenv openai
+        # 如果有requirements.txt，安装额外依赖
+        if [ -f requirements.txt ]; then
+          pip install -r requirements.txt
+        fi
+    
+    - name: 📁 准备训练文件夹
+      run: |
+        # 创建traindb文件夹
+        mkdir -p ${{ github.event.inputs.traindb_folder || 'traindb' }}
+        
+        # 如果traindb文件夹为空，添加示例文件
+        if [ -z "$(ls -A ${{ github.event.inputs.traindb_folder || 'traindb' }})" ]; then
+          echo "📄 添加示例训练文件..."
+          cat > ${{ github.event.inputs.traindb_folder || 'traindb' }}/example_credit_research.md << 'EOF'
+        # Credit Risk Management Overview
+        
+        Credit risk is one of the major risks faced by financial institutions, referring to the possibility of default by borrowers or counterparties.
+        
+        ## Main Types
+        1. Default Risk: Borrowers unable to repay on time
+        2. Concentration Risk: Excessive exposure to specific industries or regions
+        3. Country Risk: Risk from changes in political and economic environment
+        
+        ## Management Strategies
+        - Portfolio diversification
+        - Establish comprehensive credit rating system
+        - Regular stress testing
+        - Implement effective risk monitoring mechanisms
+        EOF
+          
+          cat > ${{ github.event.inputs.traindb_folder || 'traindb' }}/esg_rating_guide.md << 'EOF'
+        # ESG Rating Guide
+        
+        ESG rating is a crucial tool for evaluating corporate performance in environmental, social, and governance aspects.
+        
+        ## Rating Elements
+        
+        ### Environmental
+        - Carbon emissions management
+        - Resource utilization efficiency
+        - Environmental compliance
+        
+        ### Social
+        - Employee relations
+        - Community impact
+        - Product responsibility
+        
+        ### Governance
+        - Board independence
+        - Compensation system
+        - Information disclosure
+        
+        ## Rating Impact
+        ESG ratings directly influence a company's financing costs, investment attractiveness, and long-term value creation capability.
+        EOF
+          
+          echo "✅ Example files added"
+        fi
+        
+        echo "📊 Training folder contents:"
+        ls -la ${{ github.event.inputs.traindb_folder || 'traindb' }}/
+    
+    - name: 🔍 Check Model Manager Status
+      run: |
+        python3 << 'EOF'
+        import sys
+        import os
+        sys.path.append(os.path.join(os.getcwd(), 'oop'))
+        
+        try:
+            from model_manager import get_model_status, model_manager
+            print("🤖 Unified Model Manager Status:")
+            status = get_model_status()
+            for alias, info in status.items():
+                available = "✅" if info["available"] else "❌"
+                print(f"  {available} {alias}: {info['provider']}-{info['model_id']} ({info['type']})")
+            
+            if not any(info["available"] for info in status.values()):
+                print("⚠️ No available models, please check API key configuration")
+                sys.exit(1)
+            else:
+                print("✅ Model Manager ready")
+                
+        except ImportError as e:
+            print(f"❌ Cannot import Unified Model Manager: {e}")
+            sys.exit(1)
+        except Exception as e:
+            print(f"❌ Model Manager check failed: {e}")
+            sys.exit(1)
+        EOF
+    
+    - name: 🧮 Estimate Training Cost
+      id: estimate
+      run: |
+        python3 << 'EOF'
+        import os
+        import sys
+        from pathlib import Path
+        
+        sys.path.append(os.path.join(os.getcwd(), 'oop'))
+        
+        try:
+            from unified_chromadb_trainer import UnifiedChromaDBTrainer
+            
+            traindb_folder = "${{ github.event.inputs.traindb_folder || 'traindb' }}"
+            trainer = UnifiedChromaDBTrainer(traindb_folder)
+            
+            # Get document files, excluding documentation files
+            traindb_path = Path(traindb_folder)
+            doc_files = []
+            excluded_files = {'README.md', 'international_credit_market_dynamics.md', '文件格式示例.md'}
+            
+            for ext in ['*.md', '*.txt', '*.pdf', '*.docx']:
+                for file_path in traindb_path.glob(ext):
+                    if file_path.name not in excluded_files:
+                        doc_files.append(file_path)
+            
+            if not doc_files:
+                print(f"❌ No valid document files found in {traindb_folder}")
+                sys.exit(1)
+            
+            print("📋 Files to be processed:")
+            for file_path in doc_files:
+                print(f"  • {file_path.name}")
+            print("")
+            
+            # Simple estimation
+            total_chars = 0
+            for file_path in doc_files:
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        total_chars += len(f.read())
+                except:
+                    pass
+            
+            estimated_tokens = total_chars // 3  # Rough estimation
+            estimated_cost = estimated_tokens * 0.0001  # Approximate cost
+            
+            print(f"📊 Training Cost Estimation:")
+            print(f"  📁 File Count: {len(doc_files)}")
+            print(f"  📝 Total Characters: {total_chars:,}")
+            print(f"  🎫 Estimated Tokens: {estimated_tokens:,}")
+            print(f"  💰 Estimated Cost: ${estimated_cost:.4f}")
+            
+            # Check if exceeds limit
+            token_multiplier = float("${{ github.event.inputs.token_multiplier || '1.5' }}")
+            max_tokens = int(estimated_tokens * token_multiplier)
+            
+            print(f"  🔢 Token Limit: {max_tokens:,} ({token_multiplier}x of estimate)")
+            
+            # Output to environment variables
+            print(f"ESTIMATED_TOKENS={estimated_tokens}")
+            print(f"MAX_TOKENS={max_tokens}")
+            print(f"FILE_COUNT={len(doc_files)}")
+            
+            # Write to GITHUB_OUTPUT
+            with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                f.write(f"estimated_tokens={estimated_tokens}\n")
+                f.write(f"max_tokens={max_tokens}\n")
+                f.write(f"file_count={len(doc_files)}\n")
+                f.write(f"estimated_cost={estimated_cost:.4f}\n")
+            
+        except Exception as e:
+            print(f"❌ Cost estimation failed: {e}")
+            sys.exit(1)
+        EOF
+    
+    - name: ⚖️ User Confirmation
+      if: ${{ github.event.inputs.auto_approve != 'true' }}
+      run: |
+        echo "📋 Training Confirmation:"
+        echo "  📁 Training Files: ${{ steps.estimate.outputs.file_count }}"
+        echo "  🎫 Estimated Tokens: ${{ steps.estimate.outputs.estimated_tokens }}"
+        echo "  🔢 Token Limit: ${{ steps.estimate.outputs.max_tokens }}"
+        echo "  💰 Estimated Cost: $$${{ steps.estimate.outputs.estimated_cost }}"
+        echo ""
+        echo "⚠️ In production environment, this would wait for user confirmation"
+        echo "✅ Automatically continuing in GitHub Actions..."
+    
+    - name: 🚀 Execute Unified Training
+      id: training
+      run: |
+        echo "🎯 Starting Unified ChromaDB Training..."
+        
+        # Build command line arguments
+        ARGS="--traindb ${{ github.event.inputs.traindb_folder || 'traindb' }}"
+        ARGS="$ARGS --token-limit ${{ steps.estimate.outputs.max_tokens }}"
+        
+        if [ "${{ github.event.inputs.force_retrain }}" = "true" ]; then
+          ARGS="$ARGS --force-retrain"
+        fi
+        
+        echo "🔧 Executing command: python3 oop/unified_chromadb_trainer.py $ARGS"
+        
+        # Execute training
+        python3 oop/unified_chromadb_trainer.py $ARGS
+        
+        TRAINING_EXIT_CODE=$?
+        
+        if [ $TRAINING_EXIT_CODE -eq 0 ]; then
+          echo "✅ Unified training completed"
+        else
+          echo "❌ Unified training failed, exit code: $TRAINING_EXIT_CODE"
+          echo "🔄 Attempting backup training mode..."
+          
+          # Here we can add backup training logic
+          python3 << 'EOF'
+        print("🔄 Backup Training Mode:")
+        print("📝 Due to unified trainer failure, please check:")
+        print("  1. API key configuration")
+        print("  2. Training file format support")
+        print("  3. Token limit reasonability")
+        print("  4. Network connectivity")
+        EOF
+          
+          exit $TRAINING_EXIT_CODE
+        fi
+    
+    - name: 📊 Generate Training Report
+      if: always()
+      run: |
+        echo "📋 Training Completion Report"
+        echo "=" * 40
+        
+        # Find training result files
+        RESULT_FILES=$(find . -name "training_result_*.json" -type f 2>/dev/null | head -5)
+        
+        if [ -n "$RESULT_FILES" ]; then
+          echo "📄 Training Result Files:"
+          for file in $RESULT_FILES; do
+            echo "  📋 $file"
+            if [ -f "$file" ]; then
+              echo "    Content Preview:"
+              head -10 "$file" | sed 's/^/    /'
+            fi
+          done
+        else
+          echo "⚠️ No training result files found"
+        fi
+        
+        # Check processing records
+        if [ -f "processed_files.json" ]; then
+          echo ""
+          echo "📁 Processing Records:"
+          echo "  📋 processed_files.json exists"
+          PROCESSED_COUNT=$(python3 -c "import json; data=json.load(open('processed_files.json')); print(len(data))" 2>/dev/null || echo "unknown")
+          echo "  📊 Processed Files: $PROCESSED_COUNT"
+        fi
+        
+        # Check backups and logs
+        echo ""
+        echo "📁 Related Files:"
+        ls -la training_* processed_* *.log 2>/dev/null | head -10 || echo "  (no related files)"
+    
+    - name: 📤 Upload Training Results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: chromadb-training-results
+        path: |
+          training_result_*.json
+          processed_files.json
+          *.log
+        retention-days: 30
+    
+    - name: 🎯 Output Summary
+      if: always()
+      run: |
+        echo "## 🎯 Unified ChromaDB Training Summary" >> $GITHUB_STEP_SUMMARY
+        echo "**Execution Time**: $(date)" >> $GITHUB_STEP_SUMMARY
+        echo "**Training Folder**: ${{ github.event.inputs.traindb_folder || 'traindb' }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Force Retrain**: ${{ github.event.inputs.force_retrain }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Token Limit**: ${{ steps.estimate.outputs.max_tokens || 'unknown' }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Estimated Files**: ${{ steps.estimate.outputs.file_count || 'unknown' }}" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ steps.training.outcome }}" = "success" ]; then
+          echo "**Training Status**: ✅ Success" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "**Training Status**: ❌ Failed" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "✅ Completed using Unified Model Manager and Trainer" >> $GITHUB_STEP_SUMMARY

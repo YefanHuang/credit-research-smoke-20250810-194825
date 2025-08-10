@@ -1,0 +1,47 @@
+name: 🔧 Test GitHub Actions Connection
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_message:
+        description: 'Test Message'
+        required: false
+        default: 'GitHub Actions Connection Test'
+  
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/test-connection.yml'
+
+jobs:
+  test_connection:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📋 Checkout code
+      uses: actions/checkout@v3
+    
+    - name: 🎯 Display repository information
+      run: |
+        echo "🏠 Repository: ${{ github.repository }}"
+        echo "🌿 Branch: ${{ github.ref }}"
+        echo "👤 Triggered by: ${{ github.actor }}"
+        echo "📅 Time: $(date)"
+        echo "💬 Test Message: ${{ github.event.inputs.test_message || 'Automatically triggered test' }}"
+    
+    - name: 🔍 Check workflow files
+      run: |
+        echo "📁 Checking .github/workflows directory:"
+        ls -la .github/workflows/
+        echo ""
+        echo "📊 Workflow file count:"
+        ls .github/workflows/*.yml | wc -l
+        echo ""
+        echo "📋 All workflow files:"
+        ls .github/workflows/*.yml | xargs -I {} basename {} .yml
+    
+    - name: ✅ Connection test successful
+      run: |
+        echo "🎉 GitHub Actions connection is normal!"
+        echo "📍 If you can see this message, the workflow system is working correctly"
+        echo "🔗 Please check Actions page: https://github.com/${{ github.repository }}/actions"

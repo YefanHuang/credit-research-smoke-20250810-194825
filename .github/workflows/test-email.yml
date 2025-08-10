@@ -1,0 +1,49 @@
+name: Test Email Sending
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_message:
+        description: 'Test message content'
+        required: false
+        default: 'This is a test email from Credit Research workflow system.'
+      recipient_email:
+        description: 'Recipient email (optional, uses default if empty)'
+        required: false
+        default: ''
+
+jobs:
+  test-email:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Make test script executable
+      run: chmod +x scripts/test_email.py
+      
+    - name: Test Email Sending
+      env:
+        TEST_MESSAGE: ${{ github.event.inputs.test_message || 'This is a test email from Credit Research workflow system.' }}
+        RECIPIENT_EMAIL: ${{ github.event.inputs.recipient_email || '' }}
+        SENDER_NAME: 'Credit Research Bot (Test)'
+        
+        # SMTP Configuration (same as unified-research-analysis.yml)
+        SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+        SMTP_PORT: ${{ secrets.SMTP_PORT }}
+        SMTP_USER: ${{ secrets.SMTP_USER }}
+        SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        
+      run: python3 scripts/test_email.py
+      
+    - name: Test Summary
+      run: |
+        echo "📧 Email test completed"
+        echo "If the test passed, your SMTP configuration is correct"
+        echo "The same code is used in unified-research-analysis.yml"

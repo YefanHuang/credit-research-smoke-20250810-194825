@@ -1,0 +1,471 @@
+{
+  "生成时间": "2025-08-10T19:36:56.452031",
+  "统计信息": {
+    "总类数": 26,
+    "关系数": 36,
+    "数据类数": 10,
+    "抽象类数": 0
+  },
+  "类详情": {
+    "ModelConfig": {
+      "文件": "model_manager.py",
+      "方法数": 0,
+      "属性数": 7,
+      "父类": [],
+      "是否数据类": true,
+      "是否抽象类": false,
+      "最后修改": "2025-08-08T18:44:56"
+    },
+    "ModelRegistry": {
+      "文件": "config.py",
+      "方法数": 4,
+      "属性数": 1,
+      "父类": [],
+      "是否数据类": true,
+      "是否抽象类": false,
+      "最后修改": "2025-08-03T04:48:38"
+    },
+    "APIConfig": {
+      "文件": "config.py",
+      "方法数": 6,
+      "属性数": 4,
+      "父类": [],
+      "是否数据类": true,
+      "是否抽象类": false,
+      "最后修改": "2025-08-03T04:48:38"
+    },
+    "EmailConfig": {
+      "文件": "config.py",
+      "方法数": 0,
+      "属性数": 5,
+      "父类": [],
+      "是否数据类": true,
+      "是否抽象类": false,
+      "最后修改": "2025-08-03T04:48:38"
+    },
+    "SearchConfig": {
+      "文件": "config.py",
+      "方法数": 0,
+      "属性数": 3,
+      "父类": [],
+      "是否数据类": true,
+      "是否抽象类": false,
+      "最后修改": "2025-08-03T04:48:38"
+    },
+    "FilterConfig": {
+      "文件": "config.py",
+      "方法数": 0,
+      "属性数": 3,
+      "父类": [],
+      "是否数据类": true,
+      "是否抽象类": false,
+      "最后修改": "2025-08-03T04:48:38"
+    },
+    "ConfigManager": {
+      "文件": "config.py",
+      "方法数": 4,
+      "属性数": 0,
+      "父类": [],
+      "是否数据类": false,
+      "是否抽象类": false,
+      "最后修改": "2025-08-03T04:48:38"
+    },
+    "SearchManager": {
+      "文件": "search_manager.py",
+      "方法数": 9,
+      "属性数": 0,
+      "父类": [],
+      "是否数据类": false,
+      "是否抽象类": false,
+      "最后修改": "2025-08-08T18:34:26"
+    },
+    "UnifiedChromaDBTrainer": {
+      "文件": "unified_chromadb_trainer.py",
+      "方法数": 4,
+      "属性数": 0,
+      "父类": [],
+      "是否数据类": false,
+      "是否抽象类": false,
+      "最后修改": "2025-08-03T04:42:28"
+    },
+    "CreditResearchSystem": {
+      "文件": "credit_research_system.py",
+      "方法数": 13,
+      "属性数": 0,
+      "父类": [],
+      "是否数据类": false,
+      "是否抽象类": false,
+      "最后修改": "2025-08-01T15:54:48"
+    },
+    "ResearchClient": {
+      "文件": "research_client.py",
+      "方法数": 1,
+      "属性数": 0,
+      "父类": [],
+      "是否数据类": false,
+      "是否抽象类": false,
+      "最后修改": "2025-08-02T05:37:14"
+    },
+    "SyncResearchClient": {
+      "文件": "research_client.py",
+      "方法数": 6,
+      "属性数": 0,
+      "父类": [],
+      "是否数据类": false,
+      "是否抽象类": false,
+      "最后修改": "2025-08-02T05:37:14"
+    },
+    "EmailManager": {
+      "文件": "email_manager.py",
+      "方法数": 8,
+      "属性数": 0,
+      "父类": [],
+      "是否数据类": false,
+      "是否抽象类": false,
+      "最后修改": "2025-07-30T19:50:18"
+    },
+    "TokenUsage": {
+      "文件": "realtime_token_monitor.py",
+      "方法数": 0,
+      "属性数": 7,
+      "父类": [],
+      "是否数据类": true,
+      "是否抽象类": false,
+      "最后修改": "2025-08-02T03:10:30"
+    },
+    "TokenLimit": {
+      "文件": "realtime_token_monitor.py",
+      "方法数": 0,
+      "属性数": 5,
+      "父类": [],
+      "是否数据类": true,
+      "是否抽象类": false,
+      "最后修改": "2025-08-02T03:10:30"
+    },
+    "RealtimeTokenMonitor": {
+      "文件": "realtime_token_monitor.py",
+      "方法数": 15,
+      "属性数": 0,
+      "父类": [],
+      "是否数据类": false,
+      "是否抽象类": false,
+      "最后修改": "2025-08-02T03:10:30"
+    },
+    "ModelType": {
+      "文件": "model_manager.py",
+      "方法数": 0,
+      "属性数": 3,
+      "父类": [
+        "Enum"
+      ],
+      "是否数据类": false,
+      "是否抽象类": false,
+      "最后修改": "2025-08-08T18:44:56"
+    },
+    "UnifiedModelManager": {
+      "文件": "model_manager.py",
+      "方法数": 6,
+      "属性数": 0,
+      "父类": [],
+      "是否数据类": false,
+      "是否抽象类": false,
+      "最后修改": "2025-08-08T18:44:56"
+    },
+    "TaskType": {
+      "文件": "progress_manager.py",
+      "方法数": 0,
+      "属性数": 6,
+      "父类": [
+        "Enum"
+      ],
+      "是否数据类": false,
+      "是否抽象类": false,
+      "最后修改": "2025-08-03T04:48:38"
+    },
+    "ProgressAlgorithm": {
+      "文件": "progress_manager.py",
+      "方法数": 0,
+      "属性数": 4,
+      "父类": [
+        "Enum"
+      ],
+      "是否数据类": false,
+      "是否抽象类": false,
+      "最后修改": "2025-08-03T04:48:38"
+    },
+    "TaskProgress": {
+      "文件": "progress_manager.py",
+      "方法数": 5,
+      "属性数": 11,
+      "父类": [],
+      "是否数据类": true,
+      "是否抽象类": false,
+      "最后修改": "2025-08-03T04:48:38"
+    },
+    "TokenEstimate": {
+      "文件": "progress_manager.py",
+      "方法数": 1,
+      "属性数": 8,
+      "父类": [],
+      "是否数据类": true,
+      "是否抽象类": false,
+      "最后修改": "2025-08-03T04:48:38"
+    },
+    "ProgressManager": {
+      "文件": "progress_manager.py",
+      "方法数": 10,
+      "属性数": 0,
+      "父类": [],
+      "是否数据类": false,
+      "是否抽象类": false,
+      "最后修改": "2025-08-03T04:48:38"
+    },
+    "SearchResultProcessor": {
+      "文件": "search_result_processor.py",
+      "方法数": 6,
+      "属性数": 0,
+      "父类": [],
+      "是否数据类": false,
+      "是否抽象类": false,
+      "最后修改": "2025-08-02T23:11:34"
+    },
+    "ComponentProtocol": {
+      "文件": "component_manager.py",
+      "方法数": 2,
+      "属性数": 0,
+      "父类": [
+        "Protocol"
+      ],
+      "是否数据类": false,
+      "是否抽象类": false,
+      "最后修改": "2025-08-02T07:16:36"
+    },
+    "ComponentAggregator": {
+      "文件": "component_manager.py",
+      "方法数": 17,
+      "属性数": 0,
+      "父类": [],
+      "是否数据类": false,
+      "是否抽象类": false,
+      "最后修改": "2025-08-02T07:16:36"
+    }
+  },
+  "关系详情": [
+    {
+      "从": "ModelConfig",
+      "到": "ModelType",
+      "类型": "dependency",
+      "标签": "uses"
+    },
+    {
+      "从": "ModelRegistry",
+      "到": "ModelConfig",
+      "类型": "dependency",
+      "标签": "uses"
+    },
+    {
+      "从": "APIConfig",
+      "到": "ModelRegistry",
+      "类型": "dependency",
+      "标签": "uses"
+    },
+    {
+      "从": "APIConfig",
+      "到": "ModelConfig",
+      "类型": "dependency",
+      "标签": "uses"
+    },
+    {
+      "从": "ConfigManager",
+      "到": "ModelConfig",
+      "类型": "aggregation",
+      "标签": "configures"
+    },
+    {
+      "从": "ConfigManager",
+      "到": "APIConfig",
+      "类型": "aggregation",
+      "标签": "configures"
+    },
+    {
+      "从": "ConfigManager",
+      "到": "EmailConfig",
+      "类型": "aggregation",
+      "标签": "configures"
+    },
+    {
+      "从": "ConfigManager",
+      "到": "SearchConfig",
+      "类型": "aggregation",
+      "标签": "configures"
+    },
+    {
+      "从": "ConfigManager",
+      "到": "FilterConfig",
+      "类型": "aggregation",
+      "标签": "configures"
+    },
+    {
+      "从": "CreditResearchSystem",
+      "到": "ConfigManager",
+      "类型": "dependency",
+      "标签": "accesses"
+    },
+    {
+      "从": "CreditResearchSystem",
+      "到": "SearchManager",
+      "类型": "dependency",
+      "标签": "accesses"
+    },
+    {
+      "从": "CreditResearchSystem",
+      "到": "EmailManager",
+      "类型": "dependency",
+      "标签": "accesses"
+    },
+    {
+      "从": "CreditResearchSystem",
+      "到": "UnifiedModelManager",
+      "类型": "dependency",
+      "标签": "accesses"
+    },
+    {
+      "从": "CreditResearchSystem",
+      "到": "ProgressManager",
+      "类型": "dependency",
+      "标签": "accesses"
+    },
+    {
+      "从": "CreditResearchSystem",
+      "到": "ComponentAggregator",
+      "类型": "dependency",
+      "标签": "uses"
+    },
+    {
+      "从": "SyncResearchClient",
+      "到": "ResearchClient",
+      "类型": "dependency",
+      "标签": "uses"
+    },
+    {
+      "从": "RealtimeTokenMonitor",
+      "到": "TokenUsage",
+      "类型": "dependency",
+      "标签": "uses"
+    },
+    {
+      "从": "RealtimeTokenMonitor",
+      "到": "TokenLimit",
+      "类型": "dependency",
+      "标签": "uses"
+    },
+    {
+      "从": "UnifiedModelManager",
+      "到": "ModelType",
+      "类型": "dependency",
+      "标签": "uses"
+    },
+    {
+      "从": "UnifiedModelManager",
+      "到": "ModelConfig",
+      "类型": "dependency",
+      "标签": "uses"
+    },
+    {
+      "从": "TaskProgress",
+      "到": "TaskType",
+      "类型": "dependency",
+      "标签": "uses"
+    },
+    {
+      "从": "TokenEstimate",
+      "到": "TaskType",
+      "类型": "dependency",
+      "标签": "uses"
+    },
+    {
+      "从": "ProgressManager",
+      "到": "TaskProgress",
+      "类型": "dependency",
+      "标签": "uses"
+    },
+    {
+      "从": "ProgressManager",
+      "到": "ProgressAlgorithm",
+      "类型": "dependency",
+      "标签": "uses"
+    },
+    {
+      "从": "ProgressManager",
+      "到": "TokenEstimate",
+      "类型": "dependency",
+      "标签": "uses"
+    },
+    {
+      "从": "ProgressManager",
+      "到": "TaskType",
+      "类型": "dependency",
+      "标签": "uses"
+    },
+    {
+      "从": "ConfigManager",
+      "到": "ComponentProtocol",
+      "类型": "dependency",
+      "标签": "implements"
+    },
+    {
+      "从": "SearchManager",
+      "到": "ComponentProtocol",
+      "类型": "dependency",
+      "标签": "implements"
+    },
+    {
+      "从": "EmailManager",
+      "到": "ComponentProtocol",
+      "类型": "dependency",
+      "标签": "implements"
+    },
+    {
+      "从": "UnifiedModelManager",
+      "到": "ComponentProtocol",
+      "类型": "dependency",
+      "标签": "implements"
+    },
+    {
+      "从": "ProgressManager",
+      "到": "ComponentProtocol",
+      "类型": "dependency",
+      "标签": "implements"
+    },
+    {
+      "从": "ComponentAggregator",
+      "到": "ConfigManager",
+      "类型": "aggregation",
+      "标签": "manages"
+    },
+    {
+      "从": "ComponentAggregator",
+      "到": "SearchManager",
+      "类型": "aggregation",
+      "标签": "manages"
+    },
+    {
+      "从": "ComponentAggregator",
+      "到": "EmailManager",
+      "类型": "aggregation",
+      "标签": "manages"
+    },
+    {
+      "从": "ComponentAggregator",
+      "到": "UnifiedModelManager",
+      "类型": "aggregation",
+      "标签": "manages"
+    },
+    {
+      "从": "ComponentAggregator",
+      "到": "ProgressManager",
+      "类型": "aggregation",
+      "标签": "manages"
+    }
+  ]
+}
