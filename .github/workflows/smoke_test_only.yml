@@ -5,6 +5,18 @@ on:
     branches: [ main, master ]
   workflow_dispatch: {}
 
+env:
+  # API Keys (Optional for smoke test - will use mock mode if missing)
+  PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+  QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
+  SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+  SMTP_PORT: ${{ secrets.SMTP_PORT }}
+  SMTP_USER: ${{ secrets.SMTP_USER }}
+  SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+  
+  # Smoke test mode - allows scripts to run without real APIs
+  SMOKE_TEST_MODE: "true"
+
 jobs:
   smoke-test:
     runs-on: ubuntu-latest
@@ -25,17 +37,82 @@ jobs:
       - name: Install python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install graphviz
+          pip install graphviz python-dotenv openai requests
 
-      - name: Test UML Generation
+      - name: Runtime Usage Detection
         run: |
-          echo "=== Testing UML Generator ==="
+          echo "=== Step 1: Runtime Usage Detection ==="
+          echo "🔍 Creating runtime monitor for actual usage detection..."
+          python3 -c "
+          import os
+          import sys
+          import json
+          from pathlib import Path
+          
+          print('🔧 设置运行时追踪...')
+          
+          # 模拟运行时导入检测 (基于实际代码分析)
+          detected_modules = []
+          error_modules = []
+          
+          # 检测 oop 模块可导入性
+          sys.path.insert(0, str(Path('oop').resolve()))
+          oop_modules = ['config', 'model_manager', 'search_manager', 'email_manager', 'component_manager']
+          
+          for module in oop_modules:
+              try:
+                  exec(f'import {module}')
+                  detected_modules.append(f'oop/{module}.py')
+                  print(f'✅ {module}: 可导入')
+              except Exception as e:
+                  error_modules.append(f'oop/{module}.py: {str(e)[:50]}')
+                  print(f'❌ {module}: {str(e)[:50]}')
+          
+          # 检测 api 模块
+          api_modules = ['app.main', 'app.core.config', 'app.models.research']
+          for module in api_modules:
+              try:
+                  exec(f'import {module}')
+                  detected_modules.append(f'api/{module.replace(\".\", \"/\")}.py')
+                  print(f'✅ {module}: 可导入')
+              except Exception as e:
+                  error_modules.append(f'api/{module}: {str(e)[:50]}')
+                  print(f'❌ {module}: {str(e)[:50]}')
+          
+          # 保存运行时检测结果
+          os.makedirs('runtime_detection', exist_ok=True)
+          
+          runtime_data = {
+              'detected_modules': detected_modules,
+              'error_modules': error_modules,
+              'total_detected': len(detected_modules),
+              'total_errors': len(error_modules)
+          }
+          
+          with open('runtime_detection/used_paths.json', 'w') as f:
+              json.dump({'python_files': [str(Path(m).resolve()) for m in detected_modules]}, f, indent=2)
+          
+          with open('runtime_detection/detection_report.json', 'w') as f:
+              json.dump(runtime_data, f, indent=2)
+          
+          print(f'📊 运行时检测完成: {len(detected_modules)} 个可用模块, {len(error_modules)} 个错误模块')
+          "
+
+      - name: Test UML Generation with Runtime Data
+        env:
+          MONITOR_USED_PATHS: ${{ github.workspace }}/runtime_detection/used_paths.json
+        run: |
+          echo "=== Step 2: UML Generation with Runtime Detection ==="
+          echo "🎨 使用运行时检测数据生成 UML..."
           python pictures/UML/uml_generator.py
           ls -la pictures/UML/output/
 
-      - name: Test DFD Generation
+      - name: Test DFD Generation with Runtime Data
+        env:
+          MONITOR_USED_PATHS: ${{ github.workspace }}/runtime_detection/used_paths.json
         run: |
-          echo "=== Testing DFD Generator ==="
+          echo "=== Step 3: DFD Generation with Runtime Detection ==="
+          echo "📊 使用运行时检测数据生成 DFD..."
           python pictures/DFD/dfd_generator.py
           ls -la pictures/DFD/output/
 
